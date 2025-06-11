@@ -129,7 +129,7 @@ class _HomePageWidgetState extends State<HomePageWidget> {
                                     .secondaryBackground,
                               ),
                               child: Text(
-                                'Message',
+                                conversationMessagesItem.toString(),
                                 style: FlutterFlowTheme.of(context)
                                     .bodySmall
                                     .override(
