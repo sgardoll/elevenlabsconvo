@@ -7,23 +7,20 @@ import 'package:flutter/material.dart';
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
 import '../websocket_manager.dart';
-
-import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 
-Future<String> sendAudioToWebSocket(
+Future<String> sendTextToWebSocket(
   BuildContext context,
-  String base64AudioData,
+  String textMessage,
 ) async {
   try {
-    if (base64AudioData.isEmpty) {
-      debugPrint('❌ Empty audio data provided to Conversational AI 2.0');
-      return 'error: Empty audio data';
+    if (textMessage.isEmpty) {
+      debugPrint('❌ Empty text message provided to Conversational AI 2.0');
+      return 'error: Empty text message';
     }
 
     debugPrint(
-        '🔊 Decoding audio data for Conversational AI 2.0 (length: ${base64AudioData.length})');
+        '💬 Sending text message to Conversational AI 2.0: $textMessage');
     final wsManager = WebSocketManager();
 
     // Check connection state
@@ -42,20 +39,30 @@ Future<String> sendAudioToWebSocket(
       return 'error: Failed to connect to Conversational AI 2.0 WebSocket';
     }
 
-    final audioBytes = base64Decode(base64AudioData);
-    debugPrint(
-        '🔊 Sending audio chunk to Conversational AI 2.0 (${audioBytes.length} bytes)');
+    // Send text message using Conversational AI 2.0 multimodal feature
+    await wsManager.sendTextMessage(textMessage);
 
-    await wsManager.sendAudioChunk(Uint8List.fromList(audioBytes));
-
-    // Send user activity signal to improve turn-taking (Conversational AI 2.0 feature)
+    // Send user activity signal to improve turn-taking
     await wsManager.sendUserActivity();
 
-    debugPrint('🔊 Audio successfully sent to Conversational AI 2.0');
+    debugPrint('💬 Text message successfully sent to Conversational AI 2.0');
+
+    // Update app state to show the sent message
+    FFAppState().update(() {
+      FFAppState().conversationMessages = [
+        ...FFAppState().conversationMessages,
+        {
+          'type': 'user_text',
+          'content': textMessage,
+          'timestamp': DateTime.now().millisecondsSinceEpoch,
+        }
+      ];
+    });
 
     return 'success';
   } catch (e) {
-    debugPrint('❌ Error sending audio to Conversational AI 2.0 WebSocket: $e');
+    debugPrint(
+        '❌ Error sending text message to Conversational AI 2.0 WebSocket: $e');
     return 'error: ${e.toString()}';
   }
 }

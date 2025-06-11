@@ -25,13 +25,14 @@ class WebSocketManager {
   final _stateController =
       StreamController<WebSocketConnectionState>.broadcast();
 
-  // Configuration
+  // Configuration - Using Conversational AI 2.0 endpoint
   static const _baseUrl = 'wss://api.elevenlabs.io/v1/convai/conversation';
   String _apiKey = '';
   String _agentId = '';
   int _reconnectAttempts = 0;
   Timer? _reconnectTimer;
   bool _initialized = false;
+  String? _conversationId;
 
   Stream<Map<String, dynamic>> get messageStream => _messageController.stream;
   Stream<Uint8List> get audioStream => _audioController.stream;
@@ -54,7 +55,7 @@ class WebSocketManager {
     }
 
     debugPrint(
-        '🔌 Initializing WebSocket with apiKey: ${apiKey.substring(0, 10)}... and agentId: $agentId');
+        '🔌 Initializing WebSocket with Conversational AI 2.0 - apiKey: ${apiKey.substring(0, 10)}... and agentId: $agentId');
     _apiKey = apiKey;
     _agentId = agentId;
     await _connect();
@@ -62,58 +63,141 @@ class WebSocketManager {
   }
 
   Future<void> _connect() async {
-    debugPrint('🔌 Connecting to WebSocket...');
+    debugPrint('🔌 Connecting to Conversational AI 2.0 WebSocket...');
     _stateController.add(WebSocketConnectionState.connecting);
 
     try {
+      // Conversational AI 2.0 endpoint with agent_id parameter
       final uri =
-          Uri.parse('$_baseUrl?xi-api-key=${Uri.encodeComponent(_apiKey)}');
+          Uri.parse('$_baseUrl?agent_id=${Uri.encodeComponent(_agentId)}');
+
+      debugPrint('🔌 Connecting to: $uri');
+
+      // API key in headers for secure authentication
       _channel = IOWebSocketChannel.connect(
         uri,
-        protocols: ['json'],
+        headers: {
+          'xi-api-key': _apiKey,
+          'User-Agent': 'ElevenLabs-Flutter-SDK/2.0',
+        },
       );
 
-      debugPrint('🔌 WebSocket connected, setting up listeners');
+      debugPrint(
+          '🔌 WebSocket connected, setting up listeners for Conversational AI 2.0');
       _channel!.stream.listen(
         _handleMessage,
         onError: _handleError,
         onDone: _handleDisconnect,
       );
 
-      debugPrint('🔌 Sending initialization message');
+      debugPrint('🔌 Sending Conversational AI 2.0 initialization message');
       _sendInitialization();
       _stateController.add(WebSocketConnectionState.connected);
       _reconnectAttempts = 0;
     } catch (e) {
-      debugPrint('🔌 Error connecting to WebSocket: $e');
+      debugPrint('🔌 Error connecting to Conversational AI 2.0 WebSocket: $e');
       _handleError(e);
     }
   }
 
   void _sendInitialization() {
+    // Conversational AI 2.0 initialization with enhanced features
     final initMessage = jsonEncode({
-      'agent_id': _agentId,
-      'model': 'eleven_monolingual_v2',
-      'voice_settings': {'stability': 0.5, 'similarity_boost': 0.8}
+      'type': 'conversation_initiation_client_data',
+      'conversation_config_override': {
+        'agent': {
+          'language': 'en',
+          // Enable Conversational AI 2.0 features
+          'turn_detection': {
+            'type':
+                'server_vad', // Use server-side voice activity detection for better turn-taking
+          }
+        },
+        'tts': {
+          // Leverage improved voice synthesis in v2.0
+          'model':
+              'eleven_turbo_v2_5', // Use latest v2.5 model for better performance
+        }
+      },
+      // Enable multimodal capabilities (Conversational AI 2.0 feature)
+      'conversation_config': {
+        'modalities': [
+          'audio'
+        ], // Can be extended to ['audio', 'text'] for multimodal
+      }
     });
-    debugPrint('🔌 Sending initialization message: $initMessage');
+    debugPrint('🔌 Sending Conversational AI 2.0 initialization: $initMessage');
     _channel!.sink.add(initMessage);
   }
 
   void _handleMessage(dynamic message) {
     try {
-      debugPrint('🔌 Received message from WebSocket');
+      debugPrint(
+          '🔌 Received Conversational AI 2.0 message: ${message.toString().substring(0, math.min(200, message.toString().length))}...');
       final jsonData = jsonDecode(message);
 
-      if (jsonData['audio'] != null) {
-        debugPrint('🔌 Received audio data from WebSocket');
-        final audioBytes = base64Decode(jsonData['audio']);
-        _audioController.add(Uint8List.fromList(audioBytes));
+      // Handle Conversational AI 2.0 message types
+      switch (jsonData['type']) {
+        case 'conversation_initiation_metadata':
+          // Store conversation ID for advanced v2.0 features
+          _conversationId = jsonData['conversation_initiation_metadata_event']
+              ?['conversation_id'];
+          debugPrint('🔌 Conversation ID: $_conversationId');
+          break;
+
+        case 'audio':
+          if (jsonData['audio_event'] != null) {
+            debugPrint(
+                '🔌 Received enhanced audio data from Conversational AI 2.0');
+            final audioBytes =
+                base64Decode(jsonData['audio_event']['audio_base_64']);
+            _audioController.add(Uint8List.fromList(audioBytes));
+          }
+          break;
+
+        case 'user_transcript':
+          debugPrint(
+              '🔌 User transcript: ${jsonData['user_transcription_event']?['user_transcript']}');
+          break;
+
+        case 'agent_response':
+          debugPrint(
+              '🔌 Agent response: ${jsonData['agent_response_event']?['agent_response']}');
+          break;
+
+        case 'vad_score':
+          // Voice Activity Detection score from Conversational AI 2.0
+          final vadScore = jsonData['vad_score_event']?['vad_score'];
+          debugPrint('🔌 VAD Score: $vadScore');
+          break;
+
+        case 'ping':
+          // Handle ping-pong for connection health
+          debugPrint('🔌 Received ping, sending pong');
+          final pongMessage = jsonEncode(
+              {'type': 'pong', 'event_id': jsonData['ping_event']['event_id']});
+          _channel!.sink.add(pongMessage);
+          break;
+
+        case 'interruption':
+          debugPrint(
+              '🔌 Conversation interrupted: ${jsonData['interruption_event']?['reason']}');
+          break;
+
+        case 'client_tool_call':
+          // Advanced Conversational AI 2.0 feature for tool integration
+          debugPrint(
+              '🔌 Tool call received: ${jsonData['client_tool_call']?['tool_name']}');
+          break;
+
+        default:
+          debugPrint('🔌 Unknown message type: ${jsonData['type']}');
       }
 
       _messageController.add(jsonData);
     } catch (e) {
-      debugPrint('🔌 Error handling WebSocket message: $e');
+      debugPrint(
+          '🔌 Error handling Conversational AI 2.0 WebSocket message: $e');
       _handleError(e);
     }
   }
@@ -131,30 +215,108 @@ class WebSocketManager {
 
     try {
       final base64Audio = base64Encode(audioData);
-      debugPrint('🔌 Sending audio chunk: ${audioData.length} bytes');
+      debugPrint(
+          '🔌 Sending audio chunk to Conversational AI 2.0: ${audioData.length} bytes');
+
+      // Conversational AI 2.0 audio format
       final audioMessage = jsonEncode({
-        'type': 'user_audio_chunk',
-        'audio': base64Audio,
-        'timestamp': DateTime.now().millisecondsSinceEpoch
+        'user_audio_chunk': base64Audio,
       });
 
       _channel!.sink.add(audioMessage);
-      debugPrint('🔌 Audio chunk sent successfully');
+      debugPrint('🔌 Audio chunk sent successfully to Conversational AI 2.0');
     } catch (e) {
-      debugPrint('🔌 Error sending audio chunk: $e');
+      debugPrint('🔌 Error sending audio chunk to Conversational AI 2.0: $e');
+      _handleError(e);
+    }
+  }
+
+  // Send text message (Conversational AI 2.0 multimodal feature)
+  Future<void> sendTextMessage(String text) async {
+    if (_channel?.closeCode != null) {
+      debugPrint('🔌 WebSocket is closed, cannot send text message');
+      return;
+    }
+
+    try {
+      final textMessage = jsonEncode({'type': 'user_message', 'text': text});
+      _channel!.sink.add(textMessage);
+      debugPrint('🔌 Text message sent: $text');
+    } catch (e) {
+      debugPrint('🔌 Error sending text message: $e');
+      _handleError(e);
+    }
+  }
+
+  // Conversational AI 2.0 contextual updates for better conversation flow
+  Future<void> sendContextualUpdate(String text) async {
+    if (_channel?.closeCode != null) {
+      debugPrint('🔌 WebSocket is closed, cannot send contextual update');
+      return;
+    }
+
+    try {
+      final updateMessage =
+          jsonEncode({'type': 'contextual_update', 'text': text});
+      _channel!.sink.add(updateMessage);
+      debugPrint('🔌 Contextual update sent: $text');
+    } catch (e) {
+      debugPrint('🔌 Error sending contextual update: $e');
+      _handleError(e);
+    }
+  }
+
+  // Send user activity signal (Conversational AI 2.0 feature)
+  Future<void> sendUserActivity() async {
+    if (_channel?.closeCode != null) {
+      debugPrint('🔌 WebSocket is closed, cannot send user activity');
+      return;
+    }
+
+    try {
+      final activityMessage = jsonEncode({
+        'type': 'user_activity',
+      });
+      _channel!.sink.add(activityMessage);
+      debugPrint('🔌 User activity signal sent');
+    } catch (e) {
+      debugPrint('🔌 Error sending user activity: $e');
+      _handleError(e);
+    }
+  }
+
+  // Tool result response (Conversational AI 2.0 advanced feature)
+  Future<void> sendToolResult(String toolCallId, Map<String, dynamic> result,
+      {bool isError = false}) async {
+    if (_channel?.closeCode != null) {
+      debugPrint('🔌 WebSocket is closed, cannot send tool result');
+      return;
+    }
+
+    try {
+      final toolResultMessage = jsonEncode({
+        'type': 'client_tool_result',
+        'tool_call_id': toolCallId,
+        'result': result,
+        'is_error': isError
+      });
+      _channel!.sink.add(toolResultMessage);
+      debugPrint('🔌 Tool result sent for call ID: $toolCallId');
+    } catch (e) {
+      debugPrint('🔌 Error sending tool result: $e');
       _handleError(e);
     }
   }
 
   void _handleError(dynamic error) {
-    debugPrint('🔌 WebSocket error: $error');
+    debugPrint('🔌 Conversational AI 2.0 WebSocket error: $error');
     _stateController.add(WebSocketConnectionState.error);
     _scheduleReconnect();
     _messageController.addError(error);
   }
 
   void _handleDisconnect() {
-    debugPrint('🔌 WebSocket disconnected');
+    debugPrint('🔌 Conversational AI 2.0 WebSocket disconnected');
     _stateController.add(WebSocketConnectionState.disconnected);
     _scheduleReconnect();
   }
@@ -174,11 +336,12 @@ class WebSocketManager {
   }
 
   Future<void> close() async {
-    debugPrint('🔌 Closing WebSocket connection');
+    debugPrint('🔌 Closing Conversational AI 2.0 WebSocket connection');
     await _channel?.sink.close(1000, 'Normal closure');
     await _messageController.close();
     await _audioController.close();
     await _stateController.close();
     _reconnectTimer?.cancel();
+    _conversationId = null;
   }
 }
