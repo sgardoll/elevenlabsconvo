@@ -1,3 +1,4 @@
+import '/components/response_process_widget.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/custom_code/actions/index.dart' as actions;
@@ -93,15 +94,6 @@ class _HomePageWidgetState extends State<HomePageWidget> {
             mainAxisSize: MainAxisSize.max,
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Container(
-                width: 1.0,
-                height: 1.0,
-                child: custom_widgets.AutoPlayAudioResponse(
-                  width: 1.0,
-                  height: 1.0,
-                  base64Audio: FFAppState().lastAudioResponse,
-                ),
-              ),
               Flexible(
                 child: Align(
                   alignment: AlignmentDirectional(0.0, -1.0),
@@ -118,39 +110,10 @@ class _HomePageWidgetState extends State<HomePageWidget> {
                         itemBuilder: (context, conversationMessagesIndex) {
                           final conversationMessagesItem =
                               conversationMessages[conversationMessagesIndex];
-                          return Padding(
-                            padding: EdgeInsetsDirectional.fromSTEB(
-                                16.0, 8.0, 16.0, 8.0),
-                            child: Container(
-                              width: 100.0,
-                              height: 30.0,
-                              decoration: BoxDecoration(
-                                color: FlutterFlowTheme.of(context)
-                                    .secondaryBackground,
-                              ),
-                              child: Text(
-                                conversationMessagesItem.toString(),
-                                style: FlutterFlowTheme.of(context)
-                                    .bodySmall
-                                    .override(
-                                      font: GoogleFonts.inter(
-                                        fontWeight: FlutterFlowTheme.of(context)
-                                            .bodySmall
-                                            .fontWeight,
-                                        fontStyle: FlutterFlowTheme.of(context)
-                                            .bodySmall
-                                            .fontStyle,
-                                      ),
-                                      letterSpacing: 0.0,
-                                      fontWeight: FlutterFlowTheme.of(context)
-                                          .bodySmall
-                                          .fontWeight,
-                                      fontStyle: FlutterFlowTheme.of(context)
-                                          .bodySmall
-                                          .fontStyle,
-                                    ),
-                              ),
-                            ),
+                          return ResponseProcessWidget(
+                            key: Key(
+                                'Keyet3_${conversationMessagesIndex}_of_${conversationMessages.length}'),
+                            parameter1: conversationMessagesItem,
                           );
                         },
                       );
