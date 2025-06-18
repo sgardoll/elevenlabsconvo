@@ -1,5 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.mycompany.elevenlabsconversationalaiv2"
+    package="com.mycompany.elevenlabsconversationalai2"
     xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET"/>
 
@@ -10,7 +10,7 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <application
-        android:label="Elevenlabs Conversational AI v2"
+        android:label="Elevenlabs Conversational AI 2"
         tools:replace="android:label"
         android:icon="@mipmap/ic_launcher"
         android:requestLegacyExternalStorage="true">
@@ -50,7 +50,7 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="elevenlabsconversationalaiv2" android:host="elevenlabsconversationalaiv2.com" />
+                <data android:scheme="elevenlabsconversationalai2" android:host="elevenlabsconversationalai2.com" />
             </intent-filter>
 
         </activity>

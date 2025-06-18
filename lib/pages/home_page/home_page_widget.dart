@@ -1,9 +1,7 @@
-import '/components/response_process_widget.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
-import '/custom_code/actions/index.dart' as actions;
+import '/actions/actions.dart' as action_blocks;
 import '/custom_code/widgets/index.dart' as custom_widgets;
-import '/flutter_flow/permissions_util.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -33,14 +31,7 @@ class _HomePageWidgetState extends State<HomePageWidget> {
 
     // On page load action.
     SchedulerBinding.instance.addPostFrameCallback((_) async {
-      await requestPermission(microphonePermission);
-      await requestPermission(bluetoothPermission);
-      _model.initElevenlabsWs = await actions.initializeWebSocket(
-        context,
-        FFAppState().elevenLabsApiKey,
-        FFAppState().elevenLabsAgentId,
-      );
-      if (_model.initElevenlabsWs == 'success') {}
+      await action_blocks.initElevenlabsAndPermissions(context);
     });
   }
 
@@ -64,7 +55,7 @@ class _HomePageWidgetState extends State<HomePageWidget> {
         key: scaffoldKey,
         backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
         appBar: AppBar(
-          backgroundColor: FlutterFlowTheme.of(context).primary,
+          backgroundColor: FlutterFlowTheme.of(context).alternate,
           automaticallyImplyLeading: false,
           title: Text(
             FFAppState().wsConnectionState,
@@ -75,7 +66,7 @@ class _HomePageWidgetState extends State<HomePageWidget> {
                     fontStyle:
                         FlutterFlowTheme.of(context).headlineMedium.fontStyle,
                   ),
-                  color: Colors.white,
+                  color: FlutterFlowTheme.of(context).primaryText,
                   fontSize: 22.0,
                   letterSpacing: 0.0,
                   fontWeight:
@@ -85,60 +76,41 @@ class _HomePageWidgetState extends State<HomePageWidget> {
                 ),
           ),
           actions: [],
-          centerTitle: false,
+          centerTitle: true,
           elevation: 2.0,
         ),
         body: SafeArea(
           top: true,
-          child: Column(
-            mainAxisSize: MainAxisSize.max,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Flexible(
-                child: Align(
-                  alignment: AlignmentDirectional(0.0, -1.0),
-                  child: Builder(
-                    builder: (context) {
-                      final conversationMessages =
-                          FFAppState().conversationMessages.toList();
-
-                      return ListView.builder(
-                        padding: EdgeInsets.zero,
-                        shrinkWrap: true,
-                        scrollDirection: Axis.vertical,
-                        itemCount: conversationMessages.length,
-                        itemBuilder: (context, conversationMessagesIndex) {
-                          final conversationMessagesItem =
-                              conversationMessages[conversationMessagesIndex];
-                          return ResponseProcessWidget(
-                            key: Key(
-                                'Keyet3_${conversationMessagesIndex}_of_${conversationMessages.length}'),
-                            parameter1: conversationMessagesItem,
-                          );
-                        },
-                      );
-                    },
+          child: Align(
+            alignment: AlignmentDirectional(0.0, 1.0),
+            child: Flex(
+              direction: Axis.horizontal,
+              mainAxisSize: MainAxisSize.max,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 100.0,
+                  height: 100.0,
+                  child: custom_widgets.RoundRecordingButton(
+                    width: 100.0,
+                    height: 100.0,
+                    size: 100.0,
+                    iconSize: 50.0,
+                    elevation: 8.0,
+                    padding: 0.0,
+                    recordingColor: FlutterFlowTheme.of(context).tertiary,
+                    idleColor: FlutterFlowTheme.of(context).primary,
+                    iconColor: FlutterFlowTheme.of(context).secondaryBackground,
+                    showSnackbar: false,
+                    pulseAnimation: true,
+                    borderColor: FlutterFlowTheme.of(context).tertiary,
+                    borderWeight: 3.0,
+                    borderRadius: 100.0,
+                    rippleColor: FlutterFlowTheme.of(context).secondary,
                   ),
                 ),
-              ),
-              Container(
-                width: 80.0,
-                height: 80.0,
-                child: custom_widgets.RoundRecordingButton(
-                  width: 80.0,
-                  height: 80.0,
-                  size: 80.0,
-                  iconSize: 40.0,
-                  elevation: 8.0,
-                  padding: 0.0,
-                  recordingColor: FlutterFlowTheme.of(context).tertiary,
-                  idleColor: FlutterFlowTheme.of(context).primary,
-                  iconColor: FlutterFlowTheme.of(context).secondaryBackground,
-                  showSnackbar: false,
-                  pulseAnimation: true,
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

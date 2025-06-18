@@ -1,4 +1,5 @@
 // Automatic FlutterFlow imports
+import '/actions/actions.dart' as action_blocks;
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import 'index.dart'; // Imports other custom widgets
@@ -11,6 +12,8 @@ import '/flutter_flow/flutter_flow_widgets.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '/custom_code/actions/start_audio_recording.dart';
 import '/custom_code/actions/stop_audio_recording.dart';
+import '../websocket_manager.dart';
+import 'dart:async';
 
 class RoundRecordingButton extends StatefulWidget {
   const RoundRecordingButton({
@@ -26,6 +29,10 @@ class RoundRecordingButton extends StatefulWidget {
     this.iconColor,
     this.showSnackbar = true,
     this.pulseAnimation = true,
+    this.borderColor,
+    this.borderWeight = 0.0,
+    this.borderRadius = 30.0,
+    this.rippleColor,
   }) : super(key: key);
 
   final double? width;
@@ -39,6 +46,10 @@ class RoundRecordingButton extends StatefulWidget {
   final Color? iconColor;
   final bool showSnackbar;
   final bool pulseAnimation;
+  final Color? borderColor;
+  final double borderWeight;
+  final double borderRadius;
+  final Color? rippleColor;
 
   @override
   _RoundRecordingButtonState createState() => _RoundRecordingButtonState();
@@ -48,6 +59,12 @@ class _RoundRecordingButtonState extends State<RoundRecordingButton>
     with SingleTickerProviderStateMixin {
   late AnimationController _animationController;
   late Animation<double> _scaleAnimation;
+  bool _isAgentSpeaking = false;
+  bool _isUserSpeaking = false;
+  ConversationState _conversationState = ConversationState.idle;
+  StreamSubscription<bool>? _agentSpeakingSubscription;
+  StreamSubscription<bool>? _userSpeakingSubscription;
+  StreamSubscription<ConversationState>? _conversationStateSubscription;
 
   @override
   void initState() {
@@ -57,35 +74,94 @@ class _RoundRecordingButtonState extends State<RoundRecordingButton>
       duration: Duration(milliseconds: 1000),
     )..repeat(reverse: true);
 
-    _scaleAnimation = Tween<double>(begin: 1.0, end: 1.1).animate(
+    _scaleAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(
       CurvedAnimation(
         parent: _animationController,
         curve: Curves.easeInOut,
       ),
     );
 
-    // Only animate when recording
-    if (!FFAppState().isRecording || !widget.pulseAnimation) {
-      _animationController.stop();
+    // Initially stop animation
+    _animationController.stop();
+
+    // Listen to conversation states
+    _setupStateListeners();
+  }
+
+  void _setupStateListeners() {
+    try {
+      final wsManager = WebSocketManager();
+
+      // Listen to agent speaking state
+      _agentSpeakingSubscription = wsManager.agentSpeakingStream.listen(
+        (isAgentSpeaking) {
+          if (mounted) {
+            setState(() {
+              _isAgentSpeaking = isAgentSpeaking;
+            });
+            debugPrint('🎙️ Agent speaking state: $isAgentSpeaking');
+          }
+        },
+        onError: (error) {
+          debugPrint('❌ Error in agent speaking stream: $error');
+        },
+      );
+
+      // Listen to user speaking state
+      _userSpeakingSubscription = wsManager.userSpeakingStream.listen(
+        (isUserSpeaking) {
+          if (mounted) {
+            setState(() {
+              _isUserSpeaking = isUserSpeaking;
+            });
+            debugPrint('🎙️ User speaking state: $isUserSpeaking');
+
+            // Control animation based on user speaking
+            if (isUserSpeaking && widget.pulseAnimation) {
+              _animationController.repeat(reverse: true);
+            } else {
+              _animationController.stop();
+              _animationController.reset();
+            }
+          }
+        },
+        onError: (error) {
+          debugPrint('❌ Error in user speaking stream: $error');
+        },
+      );
+
+      // Listen to overall conversation state
+      _conversationStateSubscription = wsManager.conversationStateStream.listen(
+        (conversationState) {
+          if (mounted) {
+            setState(() {
+              _conversationState = conversationState;
+            });
+            debugPrint('🎙️ Conversation state: $conversationState');
+          }
+        },
+        onError: (error) {
+          debugPrint('❌ Error in conversation state stream: $error');
+        },
+      );
+    } catch (e) {
+      debugPrint('❌ Error setting up state listeners: $e');
     }
   }
 
   @override
   void dispose() {
     _animationController.dispose();
+    _agentSpeakingSubscription?.cancel();
+    _userSpeakingSubscription?.cancel();
+    _conversationStateSubscription?.cancel();
     super.dispose();
   }
 
   @override
   void didUpdateWidget(RoundRecordingButton oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Control animation based on recording state
-    if (FFAppState().isRecording && widget.pulseAnimation) {
-      _animationController.repeat(reverse: true);
-    } else {
-      _animationController.stop();
-      _animationController.reset();
-    }
+    // Animation is now controlled by user speaking state
   }
 
   void _showSnackBar(String message) {
@@ -134,9 +210,21 @@ class _RoundRecordingButtonState extends State<RoundRecordingButton>
     print(
         '💬 Recording button pressed. Current state: ${appState.isRecording ? 'Recording' : 'Not recording'}');
     print('💬 Connection state: ${appState.wsConnectionState}');
+    print('💬 Agent speaking: $_isAgentSpeaking');
+    print('💬 User speaking: $_isUserSpeaking');
+    print('💬 Conversation state: $_conversationState');
 
     if (appState.wsConnectionState == 'disconnected') {
       _showSnackBar('Disconnected');
+      return;
+    }
+
+    // Handle different conversation states
+    if (_isAgentSpeaking) {
+      // If agent is speaking, interrupt it
+      _showSnackBar('Interrupting agent...');
+      final wsManager = WebSocketManager();
+      await wsManager.interruptAgent();
       return;
     }
 
@@ -219,32 +307,103 @@ class _RoundRecordingButtonState extends State<RoundRecordingButton>
         widget.recordingColor ?? FlutterFlowTheme.of(context).tertiary;
     final idleColor = widget.idleColor ?? FlutterFlowTheme.of(context).primary;
     final iconColor = widget.iconColor ?? FlutterFlowTheme.of(context).info;
+    final agentSpeakingColor = FlutterFlowTheme.of(context).warning;
+    final userSpeakingColor = FlutterFlowTheme.of(context).success;
 
-    return Padding(
-      padding: EdgeInsets.all(widget.padding),
-      child: AnimatedBuilder(
-        animation: _animationController,
-        builder: (context, child) {
-          final scale = appState.isRecording && widget.pulseAnimation
-              ? _scaleAnimation.value
-              : 1.0;
+    // Determine button state and appearance based on conversation state
+    Color buttonColor;
+    IconData buttonIcon;
+    double buttonElevation;
+    String buttonTooltip;
 
-          return Transform.scale(
-            scale: scale,
-            child: child,
-          );
-        },
-        child: Container(
-          width: widget.size,
-          height: widget.size,
-          child: FloatingActionButton(
-            onPressed: _handleRecording,
-            backgroundColor: appState.isRecording ? recordingColor : idleColor,
-            elevation: appState.isRecording ? 0.0 : widget.elevation,
-            child: Icon(
-              Icons.mic,
-              color: iconColor,
-              size: widget.iconSize,
+    switch (_conversationState) {
+      case ConversationState.agentSpeaking:
+        buttonColor = agentSpeakingColor;
+        buttonIcon = Icons.volume_up;
+        buttonElevation = widget.elevation;
+        buttonTooltip = 'Agent is speaking - tap to interrupt';
+        break;
+
+      case ConversationState.userSpeaking:
+        buttonColor = userSpeakingColor;
+        buttonIcon = Icons.record_voice_over;
+        buttonElevation = 0.0;
+        buttonTooltip = 'You are speaking';
+        break;
+
+      case ConversationState.processing:
+        buttonColor = FlutterFlowTheme.of(context).secondaryText;
+        buttonIcon = Icons.hourglass_empty;
+        buttonElevation = widget.elevation;
+        buttonTooltip = 'Processing...';
+        break;
+
+      case ConversationState.idle:
+      default:
+        if (appState.isRecording) {
+          buttonColor = recordingColor;
+          buttonIcon = Icons.mic;
+          buttonElevation = 0.0;
+          buttonTooltip = 'Recording - tap to stop';
+        } else {
+          buttonColor = idleColor;
+          buttonIcon = Icons.mic;
+          buttonElevation = widget.elevation;
+          buttonTooltip = 'Tap to start recording';
+        }
+        break;
+    }
+
+    return Tooltip(
+      message: buttonTooltip,
+      child: Padding(
+        padding: EdgeInsets.all(widget.padding),
+        child: AnimatedBuilder(
+          animation: _animationController,
+          builder: (context, child) {
+            final scale = _isUserSpeaking && widget.pulseAnimation
+                ? _scaleAnimation.value
+                : 1.0;
+
+            return Transform.scale(
+              scale: scale,
+              child: child,
+            );
+          },
+          child: Container(
+            width: widget.size,
+            height: widget.size,
+            decoration: widget.borderWeight > 0 && widget.borderColor != null
+                ? BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: widget.borderColor!,
+                      width: widget.borderWeight,
+                    ),
+                  )
+                : null,
+            child: Material(
+              color: buttonColor,
+              elevation: buttonElevation,
+              shape: CircleBorder(),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: _handleRecording,
+                splashColor:
+                    widget.rippleColor ?? Colors.white.withOpacity(0.3),
+                highlightColor: widget.rippleColor?.withOpacity(0.1) ??
+                    Colors.white.withOpacity(0.1),
+                customBorder: CircleBorder(),
+                child: Container(
+                  width: widget.size,
+                  height: widget.size,
+                  child: Icon(
+                    buttonIcon,
+                    color: iconColor,
+                    size: widget.iconSize,
+                  ),
+                ),
+              ),
             ),
           ),
         ),
