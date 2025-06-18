@@ -7,53 +7,50 @@ import 'package:flutter/material.dart';
 // Begin custom action code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
-import 'start_audio_recording.dart'; // Import to access getRecorder function
-
-import 'package:record/record.dart';
 import 'package:flutter/foundation.dart';
-import '../websocket_manager.dart';
-import 'dart:typed_data';
+import '../conversation_service.dart';
+import 'start_audio_recording.dart'; // Import to access shared recorder
 
 Future<String> stopAudioRecording(BuildContext context) async {
   try {
-    debugPrint('🎙️ Stopping real-time audio recording and streaming...');
-
-    // Get the recorder from the start recording action
-    final recorder = getRecorder();
-    final isRecording = await recorder.isRecording();
-
-    if (!isRecording) {
-      debugPrint('⚠️ Not recording, nothing to stop');
-      return 'error: Not recording';
-    }
+    if (kDebugMode) print('🎙️ Stopping audio recording...');
+    
+    final conversationService = ConversationService.instance;
+    
+    // Update recording state
+    conversationService.setRecording(false);
 
     // Stop the recording stream
-    await recorder.stop();
+    final recorder = getRecorder();
+    final isRecording = await recorder.isRecording();
+    
+    if (isRecording) {
+      await recorder.stop();
+      if (kDebugMode) print('🎙️ Recording stopped');
+    } else {
+      if (kDebugMode) print('⚠️ Recorder was not recording');
+    }
 
-    // Cancel the audio stream subscription
-    final subscription = getAudioStreamSubscription();
-    await subscription?.cancel();
+    // Cancel audio stream subscription
+    final audioStreamSubscription = getAudioStreamSubscription();
+    if (audioStreamSubscription != null) {
+      await audioStreamSubscription.cancel();
+      if (kDebugMode) print('🎙️ Audio stream subscription cancelled');
+    }
 
-    // Cancel the agent speaking subscription
+    // Cancel agent speaking subscription
     final agentSpeakingSubscription = getAgentSpeakingSubscription();
-    await agentSpeakingSubscription?.cancel();
+    if (agentSpeakingSubscription != null) {
+      await agentSpeakingSubscription.cancel();
+      if (kDebugMode) print('🎙️ Bot speaking subscription cancelled');
+    }
 
-    debugPrint('🎙️ Real-time recording and streaming stopped');
-
-    // Get WebSocket manager for end-of-turn signaling
-    final wsManager = WebSocketManager();
-
-    // Send end-of-turn signal for client-side VAD
-    debugPrint('🎙️ Sending end-of-turn signal...');
-    await wsManager.sendEndOfTurn();
-
-    // Send user activity signal for turn-taking
-    await wsManager.sendUserActivity();
-
-    debugPrint('🎙️ End-of-speech signals sent successfully');
+    if (kDebugMode) print('🎙️ Audio recording stopped successfully');
     return 'success';
   } catch (e) {
-    debugPrint('❌ Error stopping real-time recording: $e');
+    if (kDebugMode) print('❌ Error stopping recording: $e');
+    // Ensure recording state is cleared even on error
+    ConversationService.instance.setRecording(false);
     return 'error: ${e.toString()}';
   }
 }

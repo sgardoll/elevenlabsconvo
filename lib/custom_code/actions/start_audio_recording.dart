@@ -11,7 +11,7 @@ import 'package:record/record.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter/foundation.dart';
-import '../websocket_manager.dart';
+import '../conversation_service.dart';
 import 'dart:async';
 import 'dart:typed_data';
 
@@ -26,23 +26,32 @@ Future<String> startAudioRecording(BuildContext context) async {
     // Request microphone permission
     final permission = await Permission.microphone.request();
     if (!permission.isGranted) {
-      debugPrint('❌ Microphone permission denied');
+      if (kDebugMode) print('❌ Microphone permission denied');
       return 'error: Microphone permission denied';
     }
 
     // Check if already recording
     final isRecording = await _recorder.isRecording();
     if (isRecording) {
-      debugPrint('⚠️ Already recording, stopping previous recording first');
+      if (kDebugMode) print('⚠️ Already recording, stopping previous recording first');
       await _recorder.stop();
       _audioStreamSubscription?.cancel();
       _agentSpeakingSubscription?.cancel();
     }
 
-    debugPrint('🎙️ Starting real-time audio recording and streaming...');
+    if (kDebugMode) print('🎙️ Starting real-time audio recording and streaming...');
 
-    // Get WebSocket manager for real-time streaming
-    final wsManager = WebSocketManager();
+    // Get ConversationService for real-time streaming
+    final conversationService = ConversationService.instance;
+
+    // Check if we can record
+    if (!conversationService.canRecord) {
+      if (kDebugMode) print('❌ Cannot record: not connected or bot is speaking');
+      return 'error: Cannot record at this time';
+    }
+
+    // Update recording state
+    conversationService.setRecording(true);
 
     // Start recording with real-time streaming
     final recordingStream = await _recorder.startStream(
@@ -56,47 +65,55 @@ Future<String> startAudioRecording(BuildContext context) async {
       ),
     );
 
-    // Listen to agent speaking state to pause/resume recording
-    _agentSpeakingSubscription = wsManager.agentSpeakingStream.listen(
-      (isAgentSpeaking) {
-        debugPrint('🎙️ Agent speaking state changed: $isAgentSpeaking');
-        if (isAgentSpeaking) {
-          debugPrint('🎙️ Pausing audio capture while agent speaks');
+    // Listen to bot speaking state to pause/resume recording
+    _agentSpeakingSubscription = conversationService.stateStream
+        .map((state) => state.isBotSpeaking)
+        .distinct()
+        .listen(
+      (isBotSpeaking) {
+        if (kDebugMode) print('🎙️ Bot speaking state changed: $isBotSpeaking');
+        if (isBotSpeaking) {
+          if (kDebugMode) print('🎙️ Pausing audio capture while bot speaks');
         } else {
-          debugPrint('🎙️ Resuming audio capture');
+          if (kDebugMode) print('🎙️ Resuming audio capture');
         }
       },
       onError: (error) {
-        debugPrint('❌ Error in agent speaking stream: $error');
+        if (kDebugMode) print('❌ Error in bot speaking stream: $error');
       },
     );
 
     // Listen to the audio stream and send chunks in real-time
     _audioStreamSubscription = recordingStream.listen(
       (audioChunk) {
-        // Only send audio if agent is not speaking to prevent feedback
-        if (!wsManager.shouldPauseRecording) {
-          debugPrint(
-              '🎙️ Received audio chunk: ${audioChunk.length} bytes, streaming to WebSocket');
-          // Send audio chunk immediately to WebSocket
-          wsManager.sendAudioChunk(audioChunk);
+        // Only send audio if bot is not speaking to prevent feedback
+        if (conversationService.canRecord && !conversationService.isBotSpeaking) {
+          if (kDebugMode) {
+            print('🎙️ Received audio chunk: ${audioChunk.length} bytes, streaming to ConversationService');
+          }
+          // Send audio chunk immediately to ConversationService
+          conversationService.sendAudioChunk(audioChunk);
         } else {
-          debugPrint(
-              '🎙️ Skipping audio chunk - agent is speaking (${audioChunk.length} bytes)');
+          if (kDebugMode) {
+            print('🎙️ Skipping audio chunk - bot is speaking (${audioChunk.length} bytes)');
+          }
         }
       },
       onError: (error) {
-        debugPrint('❌ Error in audio stream: $error');
+        if (kDebugMode) print('❌ Error in audio stream: $error');
+        conversationService.setRecording(false);
       },
       onDone: () {
-        debugPrint('🎙️ Audio stream ended');
+        if (kDebugMode) print('🎙️ Audio stream ended');
+        conversationService.setRecording(false);
       },
     );
 
-    debugPrint('🎙️ Real-time recording and streaming started successfully');
+    if (kDebugMode) print('🎙️ Real-time recording and streaming started successfully');
     return 'success';
   } catch (e) {
-    debugPrint('❌ Error starting real-time recording: $e');
+    if (kDebugMode) print('❌ Error starting real-time recording: $e');
+    ConversationService.instance.setRecording(false);
     return 'error: ${e.toString()}';
   }
 }
