@@ -1,4 +1,5 @@
 // Automatic FlutterFlow imports
+import '/actions/actions.dart' as action_blocks;
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import 'index.dart'; // Imports other custom actions
@@ -9,13 +10,13 @@ import 'package:flutter/material.dart';
 import 'start_audio_recording.dart'; // Import to access getRecorder function
 
 import 'package:record/record.dart';
-import 'dart:io';
-import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import '../websocket_manager.dart';
+import 'dart:typed_data';
 
 Future<String> stopAudioRecording(BuildContext context) async {
   try {
-    debugPrint('🎙️ Stopping audio recording...');
+    debugPrint('🎙️ Stopping real-time audio recording and streaming...');
 
     // Get the recorder from the start recording action
     final recorder = getRecorder();
@@ -26,55 +27,33 @@ Future<String> stopAudioRecording(BuildContext context) async {
       return 'error: Not recording';
     }
 
-    final path = await recorder.stop();
-    debugPrint('🎙️ Recording stopped, path: $path');
+    // Stop the recording stream
+    await recorder.stop();
 
-    if (path != null) {
-      final file = File(path);
+    // Cancel the audio stream subscription
+    final subscription = getAudioStreamSubscription();
+    await subscription?.cancel();
 
-      if (!await file.exists()) {
-        debugPrint('❌ Recorded file does not exist: $path');
-        return 'error: File not found';
-      }
+    // Cancel the agent speaking subscription
+    final agentSpeakingSubscription = getAgentSpeakingSubscription();
+    await agentSpeakingSubscription?.cancel();
 
-      debugPrint('🎙️ Reading file bytes...');
-      final bytes = await file.readAsBytes();
-      debugPrint('🎙️ File size: ${bytes.length} bytes');
+    debugPrint('🎙️ Real-time recording and streaming stopped');
 
-      if (bytes.isEmpty) {
-        debugPrint('❌ Recorded file is empty');
-        return 'error: Empty recording';
-      }
+    // Get WebSocket manager for end-of-turn signaling
+    final wsManager = WebSocketManager();
 
-      final base64Audio = base64Encode(bytes);
-      debugPrint('🎙️ Sending audio to WebSocket...');
+    // Send end-of-turn signal for client-side VAD
+    debugPrint('🎙️ Sending end-of-turn signal...');
+    await wsManager.sendEndOfTurn();
 
-      // Send audio to WebSocket
-      final result = await sendAudioToWebSocket(context, base64Audio);
-      if (result.startsWith('error')) {
-        debugPrint(
-            '❌ Error sending audio to WebSocket: ${result.substring(7)}');
-        return result;
-      }
+    // Send user activity signal for turn-taking
+    await wsManager.sendUserActivity();
 
-      debugPrint('🎙️ Audio sent to WebSocket successfully');
-
-      // Clean up temporary file
-      try {
-        await file.delete();
-        debugPrint('🎙️ Temporary file deleted');
-      } catch (e) {
-        debugPrint('⚠️ Failed to delete temporary file: $e');
-        // Don't return error here, as the audio was already sent
-      }
-    } else {
-      debugPrint('❌ No recording path returned from recorder');
-      return 'error: No recording path';
-    }
-
+    debugPrint('🎙️ End-of-speech signals sent successfully');
     return 'success';
   } catch (e) {
-    debugPrint('❌ Error stopping recording: $e');
+    debugPrint('❌ Error stopping real-time recording: $e');
     return 'error: ${e.toString()}';
   }
 }

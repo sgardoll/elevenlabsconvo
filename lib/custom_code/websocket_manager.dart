@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:flutter/foundation.dart';
+import 'widgets/auto_play_audio_response.dart';
 
 enum WebSocketConnectionState {
   connecting,
@@ -13,6 +14,8 @@ enum WebSocketConnectionState {
   reconnecting,
   error
 }
+
+enum ConversationState { idle, userSpeaking, agentSpeaking, processing }
 
 class WebSocketManager {
   static final WebSocketManager _instance = WebSocketManager._internal();
@@ -34,9 +37,39 @@ class WebSocketManager {
   bool _initialized = false;
   String? _conversationId;
 
+  // Audio feedback prevention and turn management
+  bool _isAgentSpeaking = false;
+  bool _isUserSpeaking = false;
+  bool _isRecordingPaused = false;
+  ConversationState _conversationState = ConversationState.idle;
+  Timer? _speechActivityTimer;
+  bool _agentRecentlySpeaking = false;
+  Timer? _agentGracePeriodTimer;
+
+  final _feedbackController = StreamController<bool>.broadcast();
+  final _userSpeakingController = StreamController<bool>.broadcast();
+  final _conversationStateController =
+      StreamController<ConversationState>.broadcast();
+
+  // Voice activity detection
+  double _audioThreshold = 0.01; // Threshold for detecting voice activity
+  int _consecutiveSilentChunks = 0;
+  int _consecutiveActiveChunks = 0;
+  static const int _silenceThreshold = 15; // ~1.5 seconds at 10 chunks/sec
+  static const int _speechThreshold = 3; // ~0.3 seconds to start speech
+
   Stream<Map<String, dynamic>> get messageStream => _messageController.stream;
   Stream<Uint8List> get audioStream => _audioController.stream;
   Stream<WebSocketConnectionState> get stateStream => _stateController.stream;
+  Stream<bool> get agentSpeakingStream => _feedbackController.stream;
+  Stream<bool> get userSpeakingStream => _userSpeakingController.stream;
+  Stream<ConversationState> get conversationStateStream =>
+      _conversationStateController.stream;
+
+  bool get isAgentSpeaking => _isAgentSpeaking;
+  bool get isUserSpeaking => _isUserSpeaking;
+  bool get shouldPauseRecording => _isAgentSpeaking || _isRecordingPaused;
+  ConversationState get conversationState => _conversationState;
 
   WebSocketConnectionState get currentState => _channel?.closeCode != null
       ? WebSocketConnectionState.disconnected
@@ -107,17 +140,22 @@ class WebSocketManager {
       'conversation_config_override': {
         'agent': {
           'language': 'en',
-          // Enable Conversational AI 2.0 features
+          // Use client-side VAD for better feedback control
           'turn_detection': {
             'type':
-                'server_vad', // Use server-side voice activity detection for better turn-taking
+                'client_vad', // Switch to client_vad for manual turn control
+            'threshold': 0.6, // Adjust sensitivity
+            'silence_duration_ms':
+                800 // Shorter silence duration for faster interruption
           }
         },
         'tts': {
           // Leverage improved voice synthesis in v2.0
           'model':
               'eleven_turbo_v2_5', // Use latest v2.5 model for better performance
-        }
+        },
+        // Explicitly set audio formats to ensure compatibility
+        'audio': {'input_format': 'pcm_16000', 'output_format': 'pcm_16000'}
       },
       // Enable multimodal capabilities (Conversational AI 2.0 feature)
       'conversation_config': {
@@ -147,11 +185,46 @@ class WebSocketManager {
 
         case 'audio':
           if (jsonData['audio_event'] != null) {
-            debugPrint(
-                '🔌 Received enhanced audio data from Conversational AI 2.0');
-            final audioBytes =
-                base64Decode(jsonData['audio_event']['audio_base_64']);
-            _audioController.add(Uint8List.fromList(audioBytes));
+            try {
+              final base64Audio = jsonData['audio_event']['audio_base_64'];
+
+              // Validate base64 audio data before processing
+              if (base64Audio == null || base64Audio.isEmpty) {
+                debugPrint('🔌 Received empty audio data, skipping');
+                break;
+              }
+
+              // For Conversational AI 2.0 streaming, even small chunks are valid
+              // Lower threshold to handle real-time audio streaming
+              if (base64Audio.length < 4) {
+                debugPrint(
+                    '🔌 Audio data too short (${base64Audio.length} chars), likely corrupted - skipping');
+                break;
+              }
+
+              final audioBytes = base64Decode(base64Audio);
+
+              // For Conversational AI 2.0, very small audio chunks are normal in streaming
+              // Only skip if completely empty
+              if (audioBytes.length < 2) {
+                debugPrint(
+                    '🔌 Decoded audio too small (${audioBytes.length} bytes), likely corrupted - skipping');
+                break;
+              }
+
+              debugPrint(
+                  '🔌 Received valid audio data from Conversational AI 2.0');
+              debugPrint('🔌 Audio data size: ${audioBytes.length} bytes');
+
+              // Mark agent as speaking when receiving audio
+              if (!_isAgentSpeaking) {
+                _setAgentSpeaking(true);
+              }
+
+              _audioController.add(Uint8List.fromList(audioBytes));
+            } catch (e) {
+              debugPrint('🔌 Error processing audio data: $e');
+            }
           }
           break;
 
@@ -163,6 +236,23 @@ class WebSocketManager {
         case 'agent_response':
           debugPrint(
               '🔌 Agent response: ${jsonData['agent_response_event']?['agent_response']}');
+          // Mark agent as speaking when receiving text response
+          if (!_isAgentSpeaking) {
+            _setAgentSpeaking(true);
+          }
+          break;
+
+        case 'agent_response_corrected':
+          debugPrint(
+              '🔌 Agent response corrected: ${jsonData['agent_response_corrected_event']?['agent_response_corrected']}');
+          break;
+
+        case 'agent_response_complete':
+          debugPrint('🔌 Agent response complete');
+          // Signal audio manager that response is complete and ready for playback
+          GlobalAudioManager().markResponseComplete();
+          // Mark agent as finished speaking
+          _setAgentSpeaking(false);
           break;
 
         case 'vad_score':
@@ -173,7 +263,6 @@ class WebSocketManager {
 
         case 'ping':
           // Handle ping-pong for connection health
-          debugPrint('🔌 Received ping, sending pong');
           final pongMessage = jsonEncode(
               {'type': 'pong', 'event_id': jsonData['ping_event']['event_id']});
           _channel!.sink.add(pongMessage);
@@ -182,6 +271,10 @@ class WebSocketManager {
         case 'interruption':
           debugPrint(
               '🔌 Conversation interrupted: ${jsonData['interruption_event']?['reason']}');
+          // Only reset agent speaking state if it's still true (might already be reset)
+          if (_isAgentSpeaking) {
+            _setAgentSpeaking(false);
+          }
           break;
 
         case 'client_tool_call':
@@ -202,7 +295,141 @@ class WebSocketManager {
     }
   }
 
+  void _setAgentSpeaking(bool speaking) {
+    if (_isAgentSpeaking != speaking) {
+      _isAgentSpeaking = speaking;
+      _feedbackController.add(speaking);
+
+      if (speaking) {
+        _conversationState = ConversationState.agentSpeaking;
+        _agentRecentlySpeaking = true;
+        _agentGracePeriodTimer?.cancel(); // Cancel any existing timer
+        debugPrint('🔊 Agent started speaking - pausing recording');
+      } else {
+        _conversationState = ConversationState.idle;
+        debugPrint('🔊 Agent finished speaking - starting grace period');
+
+        // Start grace period timer to prevent immediate voice detection
+        _agentGracePeriodTimer?.cancel();
+        _agentGracePeriodTimer = Timer(Duration(milliseconds: 2000), () {
+          _agentRecentlySpeaking = false;
+          debugPrint(
+              '🔊 Agent grace period ended - normal voice detection resumed');
+        });
+      }
+
+      _conversationStateController.add(_conversationState);
+    }
+  }
+
+  void _setUserSpeaking(bool speaking) {
+    if (_isUserSpeaking != speaking) {
+      _isUserSpeaking = speaking;
+      _userSpeakingController.add(speaking);
+
+      if (speaking) {
+        _conversationState = ConversationState.userSpeaking;
+        debugPrint('🎙️ User started speaking');
+
+        // If agent is speaking, interrupt it
+        if (_isAgentSpeaking) {
+          debugPrint(
+              '🎙️ User interrupted agent - sending interruption signal');
+          _sendInterruption();
+          // Stop audio playback immediately
+          GlobalAudioManager().stopAudio();
+          // Immediately reset agent speaking state to allow user audio through
+          _isAgentSpeaking = false;
+          _feedbackController.add(false);
+          debugPrint(
+              '🎙️ Agent speaking state immediately reset for interruption');
+        }
+      } else {
+        _conversationState = ConversationState.idle;
+        debugPrint('🎙️ User stopped speaking');
+
+        // Reset interrupted state when user finishes speaking to allow new agent responses
+        GlobalAudioManager().resetInterruptedState();
+
+        // Send end of turn signal after user stops speaking
+        _speechActivityTimer?.cancel();
+        _speechActivityTimer = Timer(Duration(milliseconds: 500), () {
+          if (!_isUserSpeaking) {
+            sendEndOfTurn();
+          }
+        });
+      }
+
+      _conversationStateController.add(_conversationState);
+    }
+  }
+
+  // Voice activity detection based on audio amplitude
+  void _detectVoiceActivity(Uint8List audioData) {
+    if (audioData.isEmpty) return;
+
+    // Skip voice activity detection if agent is speaking to prevent feedback loops
+    if (_isAgentSpeaking) {
+      debugPrint('🔌 Skipping voice activity detection - agent is speaking');
+      return;
+    }
+
+    // Calculate RMS (Root Mean Square) for amplitude detection
+    double sum = 0.0;
+    for (int i = 0; i < audioData.length; i += 2) {
+      if (i + 1 < audioData.length) {
+        // Combine two bytes to form a 16-bit sample
+        int sample = (audioData[i + 1] << 8) | audioData[i];
+        if (sample > 32767) sample -= 65536; // Convert to signed
+        sum += sample * sample;
+      }
+    }
+
+    double rms = math.sqrt(sum / (audioData.length / 2));
+    double normalizedRms = rms / 32768.0; // Normalize to 0-1 range
+
+    // Use higher threshold if we recently had agent speaking to account for echo/feedback
+    double currentThreshold = _audioThreshold;
+    if (_agentRecentlySpeaking) {
+      currentThreshold =
+          _audioThreshold * 3.0; // 3x higher threshold after agent speaks
+      debugPrint(
+          '🔌 Using elevated threshold due to recent agent speech: $currentThreshold');
+    }
+
+    // Voice activity detection logic
+    if (normalizedRms > currentThreshold) {
+      _consecutiveActiveChunks++;
+      _consecutiveSilentChunks = 0;
+
+      // Start speaking detection - require more consecutive chunks after agent speech
+      int requiredChunks =
+          _agentRecentlySpeaking ? _speechThreshold * 2 : _speechThreshold;
+      if (!_isUserSpeaking && _consecutiveActiveChunks >= requiredChunks) {
+        _setUserSpeaking(true);
+      }
+    } else {
+      _consecutiveSilentChunks++;
+      _consecutiveActiveChunks = 0;
+
+      // Stop speaking detection
+      if (_isUserSpeaking && _consecutiveSilentChunks >= _silenceThreshold) {
+        _setUserSpeaking(false);
+      }
+    }
+  }
+
   Future<void> sendAudioChunk(Uint8List audioData) async {
+    // Voice activity detection
+    _detectVoiceActivity(audioData);
+
+    // Prevent sending audio while agent is speaking to avoid feedback
+    if (_isAgentSpeaking || _isRecordingPaused) {
+      debugPrint(
+          '🔌 Skipping audio chunk - agent is speaking or recording paused');
+      return;
+    }
+
     if (_channel?.closeCode != null) {
       debugPrint(
           '🔌 WebSocket is closed, attempting to reconnect before sending audio');
@@ -218,7 +445,7 @@ class WebSocketManager {
       debugPrint(
           '🔌 Sending audio chunk to Conversational AI 2.0: ${audioData.length} bytes');
 
-      // Conversational AI 2.0 audio format
+      // Correct Conversational AI 2.0 audio format - user_audio_chunk as key, base64 data as value
       final audioMessage = jsonEncode({
         'user_audio_chunk': base64Audio,
       });
@@ -229,6 +456,56 @@ class WebSocketManager {
       debugPrint('🔌 Error sending audio chunk to Conversational AI 2.0: $e');
       _handleError(e);
     }
+  }
+
+  // Send interruption signal to stop agent
+  Future<void> _sendInterruption() async {
+    if (_channel?.closeCode != null) {
+      debugPrint('🔌 WebSocket is closed, cannot send interruption');
+      return;
+    }
+
+    try {
+      final interruptMessage = jsonEncode({
+        'type': 'user_interrupt',
+      });
+      _channel!.sink.add(interruptMessage);
+      debugPrint('🔌 Interruption signal sent');
+    } catch (e) {
+      debugPrint('🔌 Error sending interruption: $e');
+      _handleError(e);
+    }
+  }
+
+  // Manual interruption method (can be called by UI)
+  Future<void> interruptAgent() async {
+    if (_isAgentSpeaking) {
+      debugPrint('🔌 Manual agent interruption requested');
+      await _sendInterruption();
+      // Stop audio playback immediately
+      await GlobalAudioManager().stopAudio();
+      _setAgentSpeaking(false);
+    }
+  }
+
+  // Manual turn control methods for client-side VAD
+  void pauseRecording() {
+    _isRecordingPaused = true;
+    debugPrint('🔌 Recording manually paused');
+  }
+
+  void resumeRecording() {
+    _isRecordingPaused = false;
+    debugPrint('🔌 Recording manually resumed');
+  }
+
+  // Notify agent speaking state change (called by audio manager)
+  void notifyAgentPlaybackStarted() {
+    _setAgentSpeaking(true);
+  }
+
+  void notifyAgentPlaybackEnded() {
+    _setAgentSpeaking(false);
   }
 
   // Send text message (Conversational AI 2.0 multimodal feature)
@@ -285,6 +562,26 @@ class WebSocketManager {
     }
   }
 
+  // Send end-of-turn signal for client-side VAD (Conversational AI 2.0 feature)
+  Future<void> sendEndOfTurn() async {
+    if (_channel?.closeCode != null) {
+      debugPrint('🔌 WebSocket is closed, cannot send end-of-turn signal');
+      return;
+    }
+
+    try {
+      // Signal that the user has finished speaking for client-side VAD
+      final endOfTurnMessage = jsonEncode({
+        'type': 'user_turn_ended',
+      });
+      _channel!.sink.add(endOfTurnMessage);
+      debugPrint('🔌 End-of-turn signal sent for client-side VAD');
+    } catch (e) {
+      debugPrint('🔌 Error sending end-of-turn signal: $e');
+      _handleError(e);
+    }
+  }
+
   // Tool result response (Conversational AI 2.0 advanced feature)
   Future<void> sendToolResult(String toolCallId, Map<String, dynamic> result,
       {bool isError = false}) async {
@@ -337,10 +634,15 @@ class WebSocketManager {
 
   Future<void> close() async {
     debugPrint('🔌 Closing Conversational AI 2.0 WebSocket connection');
+    _speechActivityTimer?.cancel();
+    _agentGracePeriodTimer?.cancel();
     await _channel?.sink.close(1000, 'Normal closure');
     await _messageController.close();
     await _audioController.close();
     await _stateController.close();
+    await _feedbackController.close();
+    await _userSpeakingController.close();
+    await _conversationStateController.close();
     _reconnectTimer?.cancel();
     _conversationId = null;
   }

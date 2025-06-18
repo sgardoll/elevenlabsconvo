@@ -20,24 +20,6 @@ class FFAppState extends ChangeNotifier {
   Future initializePersistedState() async {
     secureStorage = FlutterSecureStorage();
     await _safeInitAsync(() async {
-      _conversationMessages =
-          (await secureStorage.getStringList('ff_conversationMessages'))
-                  ?.map((x) {
-                try {
-                  return jsonDecode(x);
-                } catch (e) {
-                  print("Can't decode persisted json. Error: $e.");
-                  return {};
-                }
-              }).toList() ??
-              _conversationMessages;
-    });
-    await _safeInitAsync(() async {
-      _lastAudioResponse =
-          await secureStorage.getString('ff_lastAudioResponse') ??
-              _lastAudioResponse;
-    });
-    await _safeInitAsync(() async {
       _elevenLabsApiKey =
           await secureStorage.getString('ff_elevenLabsApiKey') ??
               _elevenLabsApiKey;
@@ -60,30 +42,18 @@ class FFAppState extends ChangeNotifier {
   List<dynamic> get conversationMessages => _conversationMessages;
   set conversationMessages(List<dynamic> value) {
     _conversationMessages = value;
-    secureStorage.setStringList(
-        'ff_conversationMessages', value.map((x) => jsonEncode(x)).toList());
-  }
-
-  void deleteConversationMessages() {
-    secureStorage.delete(key: 'ff_conversationMessages');
   }
 
   void addToConversationMessages(dynamic value) {
     conversationMessages.add(value);
-    secureStorage.setStringList('ff_conversationMessages',
-        _conversationMessages.map((x) => jsonEncode(x)).toList());
   }
 
   void removeFromConversationMessages(dynamic value) {
     conversationMessages.remove(value);
-    secureStorage.setStringList('ff_conversationMessages',
-        _conversationMessages.map((x) => jsonEncode(x)).toList());
   }
 
   void removeAtIndexFromConversationMessages(int index) {
     conversationMessages.removeAt(index);
-    secureStorage.setStringList('ff_conversationMessages',
-        _conversationMessages.map((x) => jsonEncode(x)).toList());
   }
 
   void updateConversationMessagesAtIndex(
@@ -91,25 +61,16 @@ class FFAppState extends ChangeNotifier {
     dynamic Function(dynamic) updateFn,
   ) {
     conversationMessages[index] = updateFn(_conversationMessages[index]);
-    secureStorage.setStringList('ff_conversationMessages',
-        _conversationMessages.map((x) => jsonEncode(x)).toList());
   }
 
   void insertAtIndexInConversationMessages(int index, dynamic value) {
     conversationMessages.insert(index, value);
-    secureStorage.setStringList('ff_conversationMessages',
-        _conversationMessages.map((x) => jsonEncode(x)).toList());
   }
 
   String _lastAudioResponse = '';
   String get lastAudioResponse => _lastAudioResponse;
   set lastAudioResponse(String value) {
     _lastAudioResponse = value;
-    secureStorage.setString('ff_lastAudioResponse', value);
-  }
-
-  void deleteLastAudioResponse() {
-    secureStorage.delete(key: 'ff_lastAudioResponse');
   }
 
   String _wsConnectionState = 'disconnected';
@@ -118,8 +79,13 @@ class FFAppState extends ChangeNotifier {
     _wsConnectionState = value;
   }
 
-  String _elevenLabsApiKey =
-      'sk_2c1a496751bfc66846d746c17bc8d74b6150c64d5307ab56';
+  bool _isRecording = false;
+  bool get isRecording => _isRecording;
+  set isRecording(bool value) {
+    _isRecording = value;
+  }
+
+  String _elevenLabsApiKey = '';
   String get elevenLabsApiKey => _elevenLabsApiKey;
   set elevenLabsApiKey(String value) {
     _elevenLabsApiKey = value;
@@ -130,7 +96,7 @@ class FFAppState extends ChangeNotifier {
     secureStorage.delete(key: 'ff_elevenLabsApiKey');
   }
 
-  String _elevenLabsAgentId = 'agent_01jx0a0wsseybb7vb9972j46bq';
+  String _elevenLabsAgentId = '';
   String get elevenLabsAgentId => _elevenLabsAgentId;
   set elevenLabsAgentId(String value) {
     _elevenLabsAgentId = value;
@@ -139,12 +105,6 @@ class FFAppState extends ChangeNotifier {
 
   void deleteElevenLabsAgentId() {
     secureStorage.delete(key: 'ff_elevenLabsAgentId');
-  }
-
-  bool _isRecording = false;
-  bool get isRecording => _isRecording;
-  set isRecording(bool value) {
-    _isRecording = value;
   }
 }
 

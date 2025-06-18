@@ -1,8 +1,8 @@
 import '/flutter_flow/flutter_flow_util.dart';
-import 'home_page_widget.dart' show HomePageWidget;
+import 'response_item_widget.dart' show ResponseItemWidget;
 import 'package:flutter/material.dart';
 
-class HomePageModel extends FlutterFlowModel<HomePageWidget> {
+class ResponseItemModel extends FlutterFlowModel<ResponseItemWidget> {
   @override
   void initState(BuildContext context) {}
 

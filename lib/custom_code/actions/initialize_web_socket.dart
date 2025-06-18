@@ -1,4 +1,5 @@
 // Automatic FlutterFlow imports
+import '/actions/actions.dart' as action_blocks;
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import 'index.dart'; // Imports other custom actions
@@ -10,6 +11,7 @@ import 'dart:convert';
 import '../websocket_manager.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:math' show min;
+import '../widgets/auto_play_audio_response.dart';
 
 Future<String> initializeWebSocket(
   BuildContext context,
@@ -153,14 +155,13 @@ Future<String> initializeWebSocket(
       });
     });
 
-    // Listen to audio data with enhanced processing
+    // Listen to audio data and play it using the GlobalAudioManager
+    final audioManager = GlobalAudioManager();
     wsManager.audioStream.listen((audioData) {
       debugPrint(
-          '🔌 Received Conversational AI 2.0 audio data: ${audioData.length} bytes');
+          '🔌 Received Conversational AI 2.0 audio data: ${audioData.length} bytes, forwarding to GlobalAudioManager');
       final base64Audio = base64Encode(audioData);
-      FFAppState().update(() {
-        FFAppState().lastAudioResponse = base64Audio;
-      });
+      audioManager.playAudio(base64Audio);
     }, onError: (error) {
       debugPrint(
           '❌ Error from Conversational AI 2.0 WebSocket audio stream: $error');
