@@ -106,3 +106,105 @@ Future<String> sendAudioToWebSocket(String? filePath) async {
     return 'error: ${e.toString()}';
   }
 }
+
+/// Streams audio from a file to the WebSocket in real-time chunks
+/// This is an alternative implementation that reads the file as a stream
+/// and sends it chunk by chunk as requested in the improvement suggestion
+Future<String> sendAudioFileAsStream(String? filePath) async {
+  if (filePath == null || filePath.isEmpty) {
+    debugPrint('❌ Send Audio Stream: No file path provided');
+    return 'error: No file path provided';
+  }
+
+  try {
+    final file = File(filePath);
+    if (!await file.exists()) {
+      debugPrint('❌ Send Audio Stream: File does not exist: $filePath');
+      return 'error: File does not exist';
+    }
+
+    debugPrint('🎙️ Starting to stream audio file: $filePath');
+    
+    // Get the WebSocket manager
+    final wsManager = WebSocketManager();
+    
+    // Get the stream of bytes from the audio file
+    Stream<List<int>> audioStream = file.openRead();
+    
+    // Buffer to accumulate data for proper chunk sizes
+    List<int> buffer = [];
+    const int targetChunkSize = 1024; // 1KB chunks for real-time feel
+    int totalBytesSent = 0;
+    
+    await for (List<int> chunk in audioStream) {
+      // Add new data to buffer
+      buffer.addAll(chunk);
+      
+      // Send chunks of target size
+      while (buffer.length >= targetChunkSize) {
+        final audioChunk = buffer.sublist(0, targetChunkSize);
+        buffer = buffer.sublist(targetChunkSize);
+        
+        debugPrint('🔊 Streaming audio chunk: ${audioChunk.length} bytes');
+        await wsManager.sendAudioChunk(Uint8List.fromList(audioChunk));
+        totalBytesSent += audioChunk.length;
+        
+        // Small delay to simulate real-time streaming
+        await Future.delayed(const Duration(milliseconds: 20));
+      }
+    }
+    
+    // Send any remaining data in buffer
+    if (buffer.isNotEmpty) {
+      debugPrint('🔊 Streaming final audio chunk: ${buffer.length} bytes');
+      await wsManager.sendAudioChunk(Uint8List.fromList(buffer));
+      totalBytesSent += buffer.length;
+    }
+    
+    // Send empty chunk to signal end of audio
+    debugPrint('🔊 Sending empty chunk to signal end of audio stream');
+    await wsManager.sendAudioChunk(Uint8List(0));
+    
+    // Send end-of-turn signal
+    await wsManager.sendUserActivity();
+    await wsManager.sendEndOfTurn();
+    
+    debugPrint('🔊 Audio file streaming completed. Total bytes sent: $totalBytesSent');
+    
+    // Clean up the file
+    try {
+      await file.delete();
+      debugPrint('🎙️ Temporary file deleted after streaming');
+    } catch (e) {
+      debugPrint('⚠️ Error deleting temporary file after streaming: $e');
+    }
+    
+    return 'success';
+  } catch (e) {
+    debugPrint('❌ Error streaming audio file to WebSocket: $e');
+    return 'error: ${e.toString()}';
+  }
+}
+
+/// Implementation exactly as suggested in the improvement request
+/// This function implements the exact approach described in the user's suggestion
+Future<void> sendAudioToWebSocketAsStream(String? filePath) async {
+  if (filePath == null) {
+    print("File path is null, cannot send audio.");
+    return;
+  }
+
+  final file = File(filePath);
+  if (!await file.exists()) {
+    print("File does not exist at path: $filePath");
+    return;
+  }
+  
+  // Get the stream of bytes from the audio file
+  Stream<List<int>> audioStream = file.openRead();
+
+  // Send it via the manager
+  // Note: This assumes your WebSocket server is set up to receive audio this way.
+  // You may need to wrap it in a specific JSON structure.
+  await WebSocketManager().sendAudio(audioStream);
+}

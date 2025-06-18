@@ -458,6 +458,54 @@ class WebSocketManager {
     }
   }
 
+  /// Sends audio stream to WebSocket as requested in the improvement suggestion
+  /// This method accepts a Stream<List<int>> and sends it chunk by chunk
+  Future<void> sendAudio(Stream<List<int>> audioStream) async {
+    debugPrint('🔌 Starting to send audio stream to WebSocket');
+    
+    try {
+      // Buffer to accumulate data for proper chunk sizes
+      List<int> buffer = [];
+      const int targetChunkSize = 1024; // 1KB chunks for optimal performance
+      int totalBytesSent = 0;
+      
+      await for (List<int> chunk in audioStream) {
+        // Add new data to buffer
+        buffer.addAll(chunk);
+        
+        // Send chunks of target size
+        while (buffer.length >= targetChunkSize) {
+          final audioChunk = buffer.sublist(0, targetChunkSize);
+          buffer = buffer.sublist(targetChunkSize);
+          
+          // Send the chunk using existing sendAudioChunk method
+          await sendAudioChunk(Uint8List.fromList(audioChunk));
+          totalBytesSent += audioChunk.length;
+          
+          // Small delay to prevent overwhelming the WebSocket
+          await Future.delayed(const Duration(milliseconds: 10));
+        }
+      }
+      
+      // Send any remaining data in buffer
+      if (buffer.isNotEmpty) {
+        debugPrint('🔌 Sending final audio chunk from stream: ${buffer.length} bytes');
+        await sendAudioChunk(Uint8List.fromList(buffer));
+        totalBytesSent += buffer.length;
+      }
+      
+      // Send empty chunk to signal end of audio stream
+      debugPrint('🔌 Sending empty chunk to signal end of audio stream');
+      await sendAudioChunk(Uint8List(0));
+      
+      debugPrint('🔌 Audio stream completed. Total bytes sent: $totalBytesSent');
+    } catch (e) {
+      debugPrint('🔌 Error sending audio stream: $e');
+      _handleError(e);
+      rethrow;
+    }
+  }
+
   // Send interruption signal to stop agent
   Future<void> _sendInterruption() async {
     if (_channel?.closeCode != null) {
