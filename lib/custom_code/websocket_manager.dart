@@ -12,10 +12,28 @@ enum WebSocketConnectionState {
   connected,
   disconnected,
   reconnecting,
-  error
+  error,
+  retryExhausted
 }
 
 enum ConversationState { idle, userSpeaking, agentSpeaking, processing }
+
+// Enhanced error class for better error reporting
+class WebSocketError {
+  final String message;
+  final String? details;
+  final DateTime timestamp;
+  final String errorType;
+  
+  WebSocketError({
+    required this.message,
+    this.details,
+    required this.errorType,
+  }) : timestamp = DateTime.now();
+  
+  @override
+  String toString() => '$errorType: $message${details != null ? ' ($details)' : ''}';
+}
 
 class WebSocketManager {
   static final WebSocketManager _instance = WebSocketManager._internal();
@@ -27,6 +45,7 @@ class WebSocketManager {
   final _audioController = StreamController<Uint8List>.broadcast();
   final _stateController =
       StreamController<WebSocketConnectionState>.broadcast();
+  final _errorController = StreamController<WebSocketError>.broadcast();
 
   // Configuration - Using Conversational AI 2.0 endpoint
   static const _baseUrl = 'wss://api.elevenlabs.io/v1/convai/conversation';
@@ -34,8 +53,16 @@ class WebSocketManager {
   String _agentId = '';
   int _reconnectAttempts = 0;
   Timer? _reconnectTimer;
+  Timer? _connectionTimeoutTimer;
   bool _initialized = false;
   String? _conversationId;
+  WebSocketError? _lastError;
+
+  // Enhanced retry configuration
+  static const int _maxReconnectAttempts = 5;
+  static const int _baseRetryDelaySeconds = 2;
+  static const int _maxRetryDelaySeconds = 60;
+  static const int _connectionTimeoutSeconds = 30;
 
   // Audio feedback prevention and turn management
   bool _isAgentSpeaking = false;
@@ -61,6 +88,7 @@ class WebSocketManager {
   Stream<Map<String, dynamic>> get messageStream => _messageController.stream;
   Stream<Uint8List> get audioStream => _audioController.stream;
   Stream<WebSocketConnectionState> get stateStream => _stateController.stream;
+  Stream<WebSocketError> get errorStream => _errorController.stream;
   Stream<bool> get agentSpeakingStream => _feedbackController.stream;
   Stream<bool> get userSpeakingStream => _userSpeakingController.stream;
   Stream<ConversationState> get conversationStateStream =>
@@ -70,6 +98,7 @@ class WebSocketManager {
   bool get isUserSpeaking => _isUserSpeaking;
   bool get shouldPauseRecording => _isAgentSpeaking || _isRecordingPaused;
   ConversationState get conversationState => _conversationState;
+  WebSocketError? get lastError => _lastError;
 
   WebSocketConnectionState get currentState => _channel?.closeCode != null
       ? WebSocketConnectionState.disconnected
@@ -91,6 +120,8 @@ class WebSocketManager {
         '🔌 Initializing WebSocket with Conversational AI 2.0 - apiKey: ${apiKey.substring(0, 10)}... and agentId: $agentId');
     _apiKey = apiKey;
     _agentId = agentId;
+    _reconnectAttempts = 0; // Reset reconnect attempts on new initialization
+    _lastError = null; // Clear any previous errors
     await _connect();
     _initialized = true;
   }
@@ -99,7 +130,29 @@ class WebSocketManager {
     debugPrint('🔌 Connecting to Conversational AI 2.0 WebSocket...');
     _stateController.add(WebSocketConnectionState.connecting);
 
+    // Set connection timeout
+    _connectionTimeoutTimer?.cancel();
+    _connectionTimeoutTimer = Timer(Duration(seconds: _connectionTimeoutSeconds), () {
+      if (_channel?.closeCode == null) {
+        debugPrint('🔌 Connection timeout after $_connectionTimeoutSeconds seconds');
+        _handleError(WebSocketError(
+          message: 'Connection timeout after $_connectionTimeoutSeconds seconds',
+          errorType: 'ConnectionTimeout',
+          details: 'Failed to establish connection within timeout period'
+        ));
+      }
+    });
+
     try {
+      // Validate inputs before attempting connection
+      if (_apiKey.isEmpty || _agentId.isEmpty) {
+        throw WebSocketError(
+          message: 'Missing API key or agent ID',
+          errorType: 'InvalidConfiguration',
+          details: 'API key and agent ID are required for connection'
+        );
+      }
+
       // Conversational AI 2.0 endpoint with agent_id parameter
       final uri =
           Uri.parse('$_baseUrl?agent_id=${Uri.encodeComponent(_agentId)}');
@@ -127,9 +180,23 @@ class WebSocketManager {
       _sendInitialization();
       _stateController.add(WebSocketConnectionState.connected);
       _reconnectAttempts = 0;
+      _lastError = null; // Clear error on successful connection
+      _connectionTimeoutTimer?.cancel(); // Cancel timeout timer on success
     } catch (e) {
+      _connectionTimeoutTimer?.cancel();
       debugPrint('🔌 Error connecting to Conversational AI 2.0 WebSocket: $e');
-      _handleError(e);
+      
+      WebSocketError wsError;
+      if (e is WebSocketError) {
+        wsError = e;
+      } else {
+        wsError = WebSocketError(
+          message: 'Failed to connect to WebSocket',
+          errorType: 'ConnectionError',
+          details: e.toString()
+        );
+      }
+      _handleError(wsError);
     }
   }
 
@@ -606,30 +673,106 @@ class WebSocketManager {
   }
 
   void _handleError(dynamic error) {
-    debugPrint('🔌 Conversational AI 2.0 WebSocket error: $error');
+    WebSocketError wsError;
+    if (error is WebSocketError) {
+      wsError = error;
+    } else {
+      wsError = WebSocketError(
+        message: 'WebSocket error occurred',
+        errorType: 'UnknownError',
+        details: error.toString()
+      );
+    }
+    
+    _lastError = wsError;
+    debugPrint('🔌 Conversational AI 2.0 WebSocket error: $wsError');
     _stateController.add(WebSocketConnectionState.error);
+    _errorController.add(wsError);
     _scheduleReconnect();
-    _messageController.addError(error);
+    _messageController.addError(wsError);
   }
 
   void _handleDisconnect() {
     debugPrint('🔌 Conversational AI 2.0 WebSocket disconnected');
     _stateController.add(WebSocketConnectionState.disconnected);
-    _scheduleReconnect();
+    
+    // Only schedule reconnect if not manually closed
+    if (_reconnectAttempts < _maxReconnectAttempts) {
+      _scheduleReconnect();
+    } else {
+      debugPrint('🔌 Maximum reconnect attempts reached, not scheduling reconnect');
+      _stateController.add(WebSocketConnectionState.retryExhausted);
+      _errorController.add(WebSocketError(
+        message: 'Connection lost and retry attempts exhausted',
+        errorType: 'ReconnectFailed',
+        details: 'Failed to reconnect after $_maxReconnectAttempts attempts'
+      ));
+    }
   }
 
   void _scheduleReconnect() {
-    if (_reconnectAttempts >= 5) {
-      debugPrint('🔌 Maximum reconnect attempts reached, giving up');
+    if (_reconnectAttempts >= _maxReconnectAttempts) {
+      debugPrint('🔌 Maximum reconnect attempts ($_maxReconnectAttempts) reached, giving up');
+      _stateController.add(WebSocketConnectionState.retryExhausted);
+      _errorController.add(WebSocketError(
+        message: 'Maximum reconnection attempts reached',
+        errorType: 'ReconnectFailed',
+        details: 'Failed to reconnect after $_maxReconnectAttempts attempts'
+      ));
       return;
     }
 
-    debugPrint('🔌 Scheduling reconnect attempt ${_reconnectAttempts + 1}/5');
+    _stateController.add(WebSocketConnectionState.reconnecting);
+    debugPrint('🔌 Scheduling reconnect attempt ${_reconnectAttempts + 1}/$_maxReconnectAttempts');
     _reconnectTimer?.cancel();
-    final delay = Duration(seconds: math.pow(2, _reconnectAttempts).toInt());
+    
+    // Exponential backoff with jitter
+    final baseDelay = math.min(
+      _baseRetryDelaySeconds * math.pow(2, _reconnectAttempts).toInt(),
+      _maxRetryDelaySeconds
+    );
+    final jitter = math.Random().nextInt(1000); // Add up to 1 second jitter
+    final delay = Duration(milliseconds: baseDelay * 1000 + jitter);
+    
     debugPrint('🔌 Will attempt to reconnect in ${delay.inSeconds} seconds');
-    _reconnectTimer = Timer(delay, () => _connect());
-    _reconnectAttempts++;
+    _reconnectTimer = Timer(delay, () async {
+      _reconnectAttempts++;
+      await _connect();
+    });
+  }
+
+  // Manual retry method for UI
+  Future<void> retryConnection() async {
+    debugPrint('🔌 Manual reconnection attempt requested');
+    _reconnectAttempts = 0; // Reset counter for manual retry
+    _lastError = null;
+    _reconnectTimer?.cancel();
+    await _connect();
+  }
+
+  // Enhanced connection health check
+  bool get isHealthy {
+    return _channel?.closeCode == null && 
+           currentState == WebSocketConnectionState.connected &&
+           _lastError == null;
+  }
+
+  // Get human-readable connection status
+  String get connectionStatusText {
+    switch (currentState) {
+      case WebSocketConnectionState.connecting:
+        return 'Connecting...';
+      case WebSocketConnectionState.connected:
+        return 'Connected';
+      case WebSocketConnectionState.disconnected:
+        return 'Disconnected';
+      case WebSocketConnectionState.reconnecting:
+        return 'Reconnecting... (${_reconnectAttempts}/$_maxReconnectAttempts)';
+      case WebSocketConnectionState.error:
+        return 'Error: ${_lastError?.message ?? 'Unknown error'}';
+      case WebSocketConnectionState.retryExhausted:
+        return 'Connection failed - Tap to retry';
+    }
   }
 
   Future<void> close() async {
@@ -640,6 +783,7 @@ class WebSocketManager {
     await _messageController.close();
     await _audioController.close();
     await _stateController.close();
+    await _errorController.close();
     await _feedbackController.close();
     await _userSpeakingController.close();
     await _conversationStateController.close();

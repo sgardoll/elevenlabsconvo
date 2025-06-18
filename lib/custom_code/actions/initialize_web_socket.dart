@@ -21,7 +21,11 @@ Future<String> initializeWebSocket(
   try {
     if (apiKey.isEmpty || agentId.isEmpty) {
       debugPrint('❌ Missing API key or agent ID for Conversational AI 2.0');
-      return 'error: Missing API key or agent ID';
+      final errorMsg = 'Missing API key or agent ID';
+      FFAppState().update(() {
+        FFAppState().wsConnectionState = 'error: $errorMsg';
+      });
+      return 'error: $errorMsg';
     }
 
     debugPrint('🔌 Initializing Conversational AI 2.0 WebSocket connection');
@@ -39,12 +43,47 @@ Future<String> initializeWebSocket(
       FFAppState().elevenLabsAgentId = agentId;
     });
 
-    // Listen to connection state changes
+    // Listen to connection state changes with enhanced error handling
     wsManager.stateStream.listen((state) {
       debugPrint('🔌 Conversational AI 2.0 WebSocket state changed: $state');
+      String stateString;
+      switch (state) {
+        case WebSocketConnectionState.connecting:
+          stateString = 'connecting';
+          break;
+        case WebSocketConnectionState.connected:
+          stateString = 'connected';
+          break;
+        case WebSocketConnectionState.disconnected:
+          stateString = 'disconnected';
+          break;
+        case WebSocketConnectionState.reconnecting:
+          stateString = 'reconnecting';
+          break;
+        case WebSocketConnectionState.error:
+          stateString = 'error: ${wsManager.lastError?.message ?? "Unknown error"}';
+          break;
+        case WebSocketConnectionState.retryExhausted:
+          stateString = 'retryExhausted';
+          break;
+      }
+      
       FFAppState().update(() {
-        FFAppState().wsConnectionState = state.toString().split('.').last;
+        FFAppState().wsConnectionState = stateString;
       });
+    }, onError: (error) {
+      debugPrint('❌ Error in connection state stream: $error');
+      FFAppState().update(() {
+        FFAppState().wsConnectionState = 'error: Connection state error';
+      });
+    });
+
+    // Listen to error stream for detailed error reporting
+    wsManager.errorStream.listen((error) {
+      debugPrint('❌ WebSocket error received: $error');
+      // Error state is already handled by state stream, but we can log details here
+    }, onError: (error) {
+      debugPrint('❌ Error in error stream: $error');
     });
 
     // Listen to messages with enhanced Conversational AI 2.0 handling
@@ -151,20 +190,34 @@ Future<String> initializeWebSocket(
           '❌ Error from Conversational AI 2.0 WebSocket message stream: $error');
       FFAppState().update(() {
         FFAppState().wsConnectionState =
-            'error: ${error.toString().substring(0, min(50, error.toString().length))}';
+            'error: Message stream error';
       });
     });
 
-    // Listen to audio data and play it using the GlobalAudioManager
+    // Listen to audio data and play it using the GlobalAudioManager with error handling
     final audioManager = GlobalAudioManager();
+    
+    // Listen to audio manager errors
+    audioManager.errorStream.listen((errorMessage) {
+      debugPrint('❌ Audio manager error: $errorMessage');
+      // Could show user-friendly audio error notifications here
+    }, onError: (error) {
+      debugPrint('❌ Error in audio manager error stream: $error');
+    });
+    
     wsManager.audioStream.listen((audioData) {
       debugPrint(
           '🔌 Received Conversational AI 2.0 audio data: ${audioData.length} bytes, forwarding to GlobalAudioManager');
-      final base64Audio = base64Encode(audioData);
-      audioManager.playAudio(base64Audio);
+      try {
+        final base64Audio = base64Encode(audioData);
+        audioManager.playAudio(base64Audio);
+      } catch (e) {
+        debugPrint('❌ Error encoding audio data: $e');
+      }
     }, onError: (error) {
       debugPrint(
           '❌ Error from Conversational AI 2.0 WebSocket audio stream: $error');
+      // Audio stream errors are handled by the audio manager's error recovery
     });
 
     debugPrint('🔌 Conversational AI 2.0 WebSocket initialized successfully');
@@ -172,12 +225,26 @@ Future<String> initializeWebSocket(
   } catch (e) {
     debugPrint('❌ Error initializing Conversational AI 2.0 WebSocket: $e');
 
+    // Determine error type for better user feedback
+    String errorType = 'Unknown';
+    String userMessage = e.toString();
+    
+    if (e.toString().contains('network') || e.toString().contains('connection')) {
+      errorType = 'Network';
+      userMessage = 'Network connection failed. Please check your internet connection.';
+    } else if (e.toString().contains('authentication') || e.toString().contains('unauthorized')) {
+      errorType = 'Authentication';
+      userMessage = 'Authentication failed. Please check your API key.';
+    } else if (e.toString().contains('timeout')) {
+      errorType = 'Timeout';
+      userMessage = 'Connection timed out. Please try again.';
+    }
+
     // Update app state to show the error
     FFAppState().update(() {
-      FFAppState().wsConnectionState =
-          'error: ${e.toString().substring(0, min(50, e.toString().length))}';
+      FFAppState().wsConnectionState = 'error: $userMessage';
     });
 
-    return 'error: ${e.toString()}';
+    return 'error: $userMessage';
   }
 }

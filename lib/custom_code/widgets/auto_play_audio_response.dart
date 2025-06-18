@@ -46,21 +46,49 @@ class GlobalAudioManager {
   // Global tracking of played audio to prevent duplicates across widgets
   final Set<String> _playedAudioHashes = <String>{};
 
+  // Enhanced error handling
+  int _consecutiveErrors = 0;
+  static const int _maxConsecutiveErrors = 3;
+  final _errorController = StreamController<String>.broadcast();
+  Timer? _errorRecoveryTimer;
+  bool _errorRecoveryMode = false;
+
+  Stream<String> get errorStream => _errorController.stream;
+
   Future<void> playAudio(String base64Audio) async {
-    // Skip incoming audio if we're in an interrupted state
-    if (_isInterrupted || _playbackBlocked) {
+    // Skip incoming audio if we're in an interrupted state or error recovery mode
+    if (_isInterrupted || _playbackBlocked || _errorRecoveryMode) {
       debugPrint(
-          '🔊 Skipping audio chunk - interrupted: $_isInterrupted, blocked: $_playbackBlocked');
+          '🔊 Skipping audio chunk - interrupted: $_isInterrupted, blocked: $_playbackBlocked, errorRecovery: $_errorRecoveryMode');
       return;
     }
 
     try {
-      // Decode and add audio chunk to buffer
+      // Validate base64 audio input
+      if (base64Audio.isEmpty) {
+        debugPrint('🔊 Warning: Empty base64 audio provided');
+        return;
+      }
+
+      // Decode and validate audio chunk
       final audioBytes = base64Decode(base64Audio);
+      if (audioBytes.isEmpty) {
+        debugPrint('🔊 Warning: Decoded audio is empty');
+        return;
+      }
+
       _audioBuffer.add(audioBytes);
 
       debugPrint(
           '🔊 Added audio chunk to buffer: ${audioBytes.length} bytes (total chunks: ${_audioBuffer.length})');
+
+      // Reset consecutive errors on successful audio processing
+      if (_consecutiveErrors > 0) {
+        debugPrint('🔊 Resetting consecutive error count (was $_consecutiveErrors)');
+        _consecutiveErrors = 0;
+        _errorRecoveryMode = false;
+        _errorRecoveryTimer?.cancel();
+      }
 
       // Start playback after collecting enough chunks or after a delay
       if (!_hasStartedPlayback && !_isPlaying) {
@@ -68,14 +96,85 @@ class GlobalAudioManager {
       }
     } catch (e) {
       debugPrint('❌ Error processing audio chunk: $e');
+      _handleAudioError('Failed to process audio chunk', e);
+    }
+  }
+
+  void _handleAudioError(String message, dynamic error) {
+    _consecutiveErrors++;
+    final errorMessage = '$message: $error (Consecutive errors: $_consecutiveErrors)';
+    debugPrint('❌ Audio Error: $errorMessage');
+    
+    _errorController.add(errorMessage);
+
+    if (_consecutiveErrors >= _maxConsecutiveErrors) {
+      debugPrint('❌ Too many consecutive errors ($_consecutiveErrors), entering recovery mode');
+      _enterErrorRecoveryMode();
+    }
+  }
+
+  void _enterErrorRecoveryMode() {
+    _errorRecoveryMode = true;
+    _playbackBlocked = true;
+    
+    // Stop current playback and cleanup
+    _stopCurrentPlayback();
+    
+    // Clear buffer to prevent further issues
+    _audioBuffer.clear();
+    
+    // Schedule recovery attempt
+    _errorRecoveryTimer?.cancel();
+    _errorRecoveryTimer = Timer(Duration(seconds: 5), () {
+      debugPrint('🔊 Attempting error recovery...');
+      _attemptErrorRecovery();
+    });
+
+    // Notify WebSocket manager of audio issues
+    final wsManager = WebSocketManager();
+    wsManager.notifyAgentPlaybackEnded();
+    
+    _errorController.add('Audio system entering recovery mode due to repeated errors');
+  }
+
+  Future<void> _attemptErrorRecovery() async {
+    try {
+      debugPrint('🔊 Performing error recovery...');
+      
+      // Cleanup any existing resources
+      await _cleanup();
+      
+      // Reset state
+      _isPlaying = false;
+      _hasStartedPlayback = false;
+      _isResponseComplete = false;
+      _processingInterruption = false;
+      _audioBuffer.clear();
+      
+      // Exit recovery mode
+      _errorRecoveryMode = false;
+      _playbackBlocked = false;
+      _consecutiveErrors = 0;
+      
+      debugPrint('🔊 Error recovery completed');
+      _errorController.add('Audio system recovered');
+      
+    } catch (e) {
+      debugPrint('❌ Error recovery failed: $e');
+      _errorController.add('Audio system recovery failed: $e');
+      
+      // If recovery fails, stay in error mode longer
+      _errorRecoveryTimer = Timer(Duration(seconds: 15), () {
+        _attemptErrorRecovery();
+      });
     }
   }
 
   void _schedulePlayback() {
-    // Don't schedule playback if interrupted, blocked, or processing interruption
-    if (_isInterrupted || _playbackBlocked || _processingInterruption) {
+    // Don't schedule playback if interrupted, blocked, processing interruption, or in error recovery
+    if (_isInterrupted || _playbackBlocked || _processingInterruption || _errorRecoveryMode) {
       debugPrint(
-          '🔊 Skipping playback scheduling - interrupted, blocked, or processing interruption');
+          '🔊 Skipping playback scheduling - interrupted, blocked, processing interruption, or in error recovery');
       return;
     }
 
@@ -89,7 +188,8 @@ class GlobalAudioManager {
         if (_audioBuffer.isNotEmpty &&
             !_isPlaying &&
             !_isInterrupted &&
-            !_playbackBlocked) {
+            !_playbackBlocked &&
+            !_errorRecoveryMode) {
           _startPlayback();
         }
       });
@@ -98,10 +198,10 @@ class GlobalAudioManager {
 
   // Signal that the agent response is complete and ready for playback
   void markResponseComplete() {
-    // Don't mark complete if interrupted, blocked, or processing interruption
-    if (_isInterrupted || _playbackBlocked || _processingInterruption) {
+    // Don't mark complete if interrupted, blocked, processing interruption, or in error recovery
+    if (_isInterrupted || _playbackBlocked || _processingInterruption || _errorRecoveryMode) {
       debugPrint(
-          '🔊 Skipping response complete - interrupted, blocked, or processing interruption');
+          '🔊 Skipping response complete - interrupted, blocked, processing interruption, or in error recovery');
       return;
     }
 
@@ -111,7 +211,8 @@ class GlobalAudioManager {
         !_isPlaying &&
         _audioBuffer.isNotEmpty &&
         !_isInterrupted &&
-        !_playbackBlocked) {
+        !_playbackBlocked &&
+        !_errorRecoveryMode) {
       _startPlayback();
     }
   }
@@ -121,9 +222,10 @@ class GlobalAudioManager {
         _audioBuffer.isEmpty ||
         _isInterrupted ||
         _playbackBlocked ||
-        _processingInterruption) {
+        _processingInterruption ||
+        _errorRecoveryMode) {
       debugPrint(
-          '🔊 Skipping playback - isPlaying: $_isPlaying, bufferEmpty: ${_audioBuffer.isEmpty}, interrupted: $_isInterrupted, blocked: $_playbackBlocked, processingInterruption: $_processingInterruption');
+          '🔊 Skipping playback - isPlaying: $_isPlaying, bufferEmpty: ${_audioBuffer.isEmpty}, interrupted: $_isInterrupted, blocked: $_playbackBlocked, processingInterruption: $_processingInterruption, errorRecovery: $_errorRecoveryMode');
       return;
     }
 
@@ -157,7 +259,6 @@ class GlobalAudioManager {
       await _cleanup();
 
       // Notify WebSocket manager that agent playback is starting
-      final wsManager = WebSocketManager();
       wsManager.notifyAgentPlaybackStarted();
 
       _player = AudioPlayer();
@@ -170,35 +271,67 @@ class GlobalAudioManager {
       _currentTempFile = File(
           '${tempDir.path}/temp_audio_${DateTime.now().millisecondsSinceEpoch}.wav');
 
-      // Write concatenated PCM data to WAV file
-      final wavHeader = _createWavHeader(concatenatedAudio.length);
-      final wavData = Uint8List.fromList([...wavHeader, ...concatenatedAudio]);
-      await _currentTempFile!.writeAsBytes(wavData);
+      // Write concatenated PCM data to WAV file with error handling
+      try {
+        final wavHeader = _createWavHeader(concatenatedAudio.length);
+        final wavData = Uint8List.fromList([...wavHeader, ...concatenatedAudio]);
+        await _currentTempFile!.writeAsBytes(wavData);
 
-      debugPrint('🔊 Created temp audio file: ${_currentTempFile!.path}');
-
-      // Set up completion listener before playing
-      _player!.playerStateStream.listen((state) {
-        if (state.processingState == ProcessingState.completed) {
-          debugPrint('🔊 Audio playback completed');
-          // Notify WebSocket manager that agent playback ended
-          wsManager.notifyAgentPlaybackEnded();
-          _isPlaying = false;
-          _hasStartedPlayback = false;
-
-          // Clear the buffer since this audio is done
-          _audioBuffer.clear();
+        // Validate file was created successfully
+        if (!await _currentTempFile!.exists()) {
+          throw Exception('Failed to create temporary audio file');
         }
-      });
 
-      // Play the audio file
-      await _player!.setFilePath(_currentTempFile!.path);
-      _isPlaying = true;
-      await _player!.play();
+        final fileSize = await _currentTempFile!.length();
+        if (fileSize < 44) { // WAV header is 44 bytes minimum
+          throw Exception('Created audio file is too small (${fileSize} bytes)');
+        }
 
-      debugPrint('🔊 Audio playback started successfully');
+        debugPrint('🔊 Created temp audio file: ${_currentTempFile!.path} (${fileSize} bytes)');
+      } catch (e) {
+        throw Exception('Failed to create audio file: $e');
+      }
+
+      // Set up completion and error listeners before playing
+      late StreamSubscription playerStateSubscription;
+      playerStateSubscription = _player!.playerStateStream.listen(
+        (state) {
+          if (state.processingState == ProcessingState.completed) {
+            debugPrint('🔊 Audio playback completed');
+            // Notify WebSocket manager that agent playback ended
+            wsManager.notifyAgentPlaybackEnded();
+            _isPlaying = false;
+            _hasStartedPlayback = false;
+
+            // Clear the buffer since this audio is done
+            _audioBuffer.clear();
+            
+            // Cancel the subscription
+            playerStateSubscription.cancel();
+          }
+        },
+        onError: (error) {
+          debugPrint('❌ Audio player state error: $error');
+          _handleAudioError('Audio player state error', error);
+          playerStateSubscription.cancel();
+        }
+      );
+
+      // Play the audio file with timeout
+      try {
+        await _player!.setFilePath(_currentTempFile!.path);
+        _isPlaying = true;
+        await _player!.play();
+
+        debugPrint('🔊 Audio playback started successfully');
+      } catch (e) {
+        playerStateSubscription.cancel();
+        throw Exception('Failed to play audio: $e');
+      }
+
     } catch (e) {
       debugPrint('❌ Error in audio playback: $e');
+      _handleAudioError('Audio playback failed', e);
 
       // Ensure we notify that playback ended even on error
       final wsManager = WebSocketManager();
@@ -279,6 +412,20 @@ class GlobalAudioManager {
       }
     } catch (e) {
       debugPrint('🔊 Error during cleanup: $e');
+      // Don't rethrow cleanup errors to prevent cascading failures
+    }
+  }
+
+  // Stop current playback without cleanup (for error recovery)
+  void _stopCurrentPlayback() {
+    try {
+      if (_player != null && _isPlaying) {
+        _player!.stop();
+        _isPlaying = false;
+      }
+      _playbackTimer?.cancel();
+    } catch (e) {
+      debugPrint('🔊 Error stopping current playback: $e');
     }
   }
 
@@ -293,33 +440,39 @@ class GlobalAudioManager {
     _processingInterruption = true;
     debugPrint('🔊 Stopping audio playback due to interruption');
 
-    // Set all blocking flags immediately
-    _isInterrupted = true; // Set interrupted flag to reject new audio
-    _playbackBlocked = true; // Block any future playback attempts
-    _isResponseComplete =
-        false; // Reset response state to prevent completion triggers
-    _hasStartedPlayback = false;
+    try {
+      // Set all blocking flags immediately
+      _isInterrupted = true; // Set interrupted flag to reject new audio
+      _playbackBlocked = true; // Block any future playback attempts
+      _isResponseComplete =
+          false; // Reset response state to prevent completion triggers
+      _hasStartedPlayback = false;
 
-    // Cancel any pending operations
-    _playbackTimer?.cancel(); // Cancel any pending playback timers
+      // Cancel any pending operations
+      _playbackTimer?.cancel(); // Cancel any pending playback timers
 
-    // Clear the buffer to prevent further playback
-    _audioBuffer.clear();
+      // Clear the buffer to prevent further playback
+      _audioBuffer.clear();
 
-    if (_player != null && _isPlaying) {
-      await _player!.stop();
-      _isPlaying = false;
+      if (_player != null && _isPlaying) {
+        await _player!.stop();
+        _isPlaying = false;
 
-      // Notify that playback ended
-      final wsManager = WebSocketManager();
-      wsManager.notifyAgentPlaybackEnded();
+        // Notify that playback ended
+        final wsManager = WebSocketManager();
+        wsManager.notifyAgentPlaybackEnded();
+      }
+
+      await _cleanup();
+
+      debugPrint('🔊 Interruption processing completed');
+    } catch (e) {
+      debugPrint('❌ Error during audio interruption: $e');
+      _handleAudioError('Failed to stop audio during interruption', e);
+    } finally {
+      // Always reset the processing flag
+      _processingInterruption = false;
     }
-
-    await _cleanup();
-
-    // Reset the processing flag at the end
-    _processingInterruption = false;
-    debugPrint('🔊 Interruption processing completed');
   }
 
   bool get isPlaying => _isPlaying;
@@ -335,14 +488,44 @@ class GlobalAudioManager {
       _isResponseComplete = false; // Ensure response complete is also reset
       _audioBuffer.clear();
       _playbackTimer?.cancel();
+      
+      // Also reset error recovery state if active
+      if (_errorRecoveryMode) {
+        _errorRecoveryMode = false;
+        _consecutiveErrors = 0;
+        _errorRecoveryTimer?.cancel();
+        debugPrint('🔊 Also reset error recovery mode');
+      }
+    }
+  }
+
+  // Get current audio system status
+  String get statusText {
+    if (_errorRecoveryMode) {
+      return 'Audio system recovering...';
+    } else if (_isPlaying) {
+      return 'Playing audio';
+    } else if (_playbackBlocked) {
+      return 'Audio playback blocked';
+    } else if (_audioBuffer.isNotEmpty) {
+      return 'Audio buffering (${_audioBuffer.length} chunks)';
+    } else {
+      return 'Audio ready';
     }
   }
 
   Future<void> dispose() async {
-    _audioBuffer.clear();
-    _playedAudioHashes.clear();
-    _playbackTimer?.cancel();
-    await _cleanup();
+    try {
+      _audioBuffer.clear();
+      _playedAudioHashes.clear();
+      _playbackTimer?.cancel();
+      _errorRecoveryTimer?.cancel();
+      await _errorController.close();
+      await _cleanup();
+      debugPrint('🔊 GlobalAudioManager disposed successfully');
+    } catch (e) {
+      debugPrint('❌ Error during GlobalAudioManager disposal: $e');
+    }
   }
 }
 

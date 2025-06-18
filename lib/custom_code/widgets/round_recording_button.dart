@@ -184,22 +184,84 @@ class _RoundRecordingButtonState extends State<RoundRecordingButton>
   void _showPermissionDialog() {
     showDialog(
       context: context,
+      barrierDismissible: false, // Require user action
       builder: (BuildContext context) => AlertDialog(
-        title: Text('Microphone Permission Required'),
-        content: Text(
-            'Please enable microphone permission in app settings to use this feature.'),
+        title: Row(
+          children: [
+            Icon(Icons.mic_off, color: FlutterFlowTheme.of(context).error),
+            SizedBox(width: 8),
+            Text('Microphone Permission Required'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'This app needs microphone access to record your voice for conversation.',
+              style: FlutterFlowTheme.of(context).bodyMedium,
+            ),
+            SizedBox(height: 12),
+            Text(
+              'To enable microphone access:',
+              style: FlutterFlowTheme.of(context).bodyMedium.override(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            SizedBox(height: 8),
+            Text(
+              '1. Tap "Open Settings" below\n2. Find this app in the list\n3. Enable "Microphone" permission\n4. Return to the app',
+              style: FlutterFlowTheme.of(context).bodySmall,
+            ),
+          ],
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: Text('Cancel'),
           ),
-          TextButton(
+          ElevatedButton.icon(
             onPressed: () {
               Navigator.of(context).pop();
               openAppSettings();
             },
-            child: Text('Open Settings'),
+            icon: Icon(Icons.settings),
+            label: Text('Open Settings'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: FlutterFlowTheme.of(context).primary,
+              foregroundColor: FlutterFlowTheme.of(context).primaryText,
+            ),
           ),
+        ],
+      ),
+    );
+  }
+
+  void _showErrorDialog(String title, String message, {String? actionLabel, VoidCallback? onAction}) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.error_outline, color: FlutterFlowTheme.of(context).error),
+            SizedBox(width: 8),
+            Text(title),
+          ],
+        ),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text('OK'),
+          ),
+          if (actionLabel != null && onAction != null)
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                onAction();
+              },
+              child: Text(actionLabel),
+            ),
         ],
       ),
     );
@@ -214,8 +276,36 @@ class _RoundRecordingButtonState extends State<RoundRecordingButton>
     print('💬 User speaking: $_isUserSpeaking');
     print('💬 Conversation state: $_conversationState');
 
+    // Check WebSocket connection state first
     if (appState.wsConnectionState == 'disconnected') {
-      _showSnackBar('Disconnected');
+      _showSnackBar('Not connected to voice service');
+      return;
+    }
+
+    if (appState.wsConnectionState.startsWith('error:')) {
+      _showErrorDialog(
+        'Connection Error', 
+        'There\'s an issue with the voice service connection. Please try reconnecting.',
+        actionLabel: 'Retry Connection',
+        onAction: () async {
+          // Trigger reconnection
+          final wsManager = WebSocketManager();
+          await wsManager.retryConnection();
+        },
+      );
+      return;
+    }
+
+    if (appState.wsConnectionState == 'retryExhausted') {
+      _showErrorDialog(
+        'Connection Failed', 
+        'Unable to connect to voice service after multiple attempts.',
+        actionLabel: 'Try Again',
+        onAction: () async {
+          final wsManager = WebSocketManager();
+          await wsManager.retryConnection();
+        },
+      );
       return;
     }
 
@@ -223,8 +313,13 @@ class _RoundRecordingButtonState extends State<RoundRecordingButton>
     if (_isAgentSpeaking) {
       // If agent is speaking, interrupt it
       _showSnackBar('Interrupting agent...');
-      final wsManager = WebSocketManager();
-      await wsManager.interruptAgent();
+      try {
+        final wsManager = WebSocketManager();
+        await wsManager.interruptAgent();
+      } catch (e) {
+        print('❌ Error interrupting agent: $e');
+        _showSnackBar('Failed to interrupt agent');
+      }
       return;
     }
 
@@ -232,69 +327,152 @@ class _RoundRecordingButtonState extends State<RoundRecordingButton>
       // Stop recording
       print('💬 Stopping recording...');
       try {
-        final result = await stopAudioRecording(
-          context,
-        );
+        final result = await stopAudioRecording(context);
         print('💬 Stop recording result: $result');
+        
         if (result.startsWith('error')) {
-          _showSnackBar('Error stopping recording: ${result.substring(7)}');
+          final errorMsg = result.substring(7);
+          _showSnackBar('Error stopping recording: $errorMsg');
+          
+          // Try to reset recording state even if stop failed
+          FFAppState().update(() {
+            FFAppState().isRecording = false;
+          });
+        } else {
+          // Update app state on successful stop
+          FFAppState().update(() {
+            FFAppState().isRecording = false;
+          });
         }
-
-        // Update app state
-        FFAppState().update(() {
-          FFAppState().isRecording = false;
-        });
       } catch (e) {
         print('❌ Error stopping recording: $e');
         _showSnackBar('Error: $e');
+        
+        // Reset state on error
+        FFAppState().update(() {
+          FFAppState().isRecording = false;
+        });
       }
     } else {
-      // Check microphone permission status first
+      // Start recording - check permissions with enhanced UX
+      await _handlePermissionAndStartRecording();
+    }
+  }
+
+  Future<void> _handlePermissionAndStartRecording() async {
+    try {
       print('💬 Checking microphone permission...');
       final status = await Permission.microphone.status;
       print('💬 Microphone permission status: $status');
 
-      if (status.isGranted) {
-        // Permission already granted, start recording
-        _startRecording();
-      } else if (status.isPermanentlyDenied) {
-        // Permission permanently denied, show dialog to open settings
-        _showPermissionDialog();
-      } else {
-        // Request permission
-        print('💬 Requesting microphone permission...');
-        final requestStatus = await Permission.microphone.request();
-        print('💬 Microphone permission request status: $requestStatus');
+      switch (status) {
+        case PermissionStatus.granted:
+          // Permission already granted, start recording
+          await _startRecording();
+          break;
 
-        if (requestStatus.isGranted) {
-          _startRecording();
-        } else {
-          _showSnackBar('Need Microphone Permissions');
-        }
+        case PermissionStatus.denied:
+          // Permission denied but can be requested
+          print('💬 Requesting microphone permission...');
+          _showSnackBar('Requesting microphone permission...');
+          
+          final requestStatus = await Permission.microphone.request();
+          print('💬 Microphone permission request result: $requestStatus');
+
+          if (requestStatus.isGranted) {
+            await _startRecording();
+          } else if (requestStatus.isPermanentlyDenied) {
+            _showPermissionDialog();
+          } else {
+            _showSnackBar('Microphone permission is required for voice recording');
+          }
+          break;
+
+        case PermissionStatus.permanentlyDenied:
+          // Permission permanently denied, show dialog to open settings
+          _showPermissionDialog();
+          break;
+
+        case PermissionStatus.restricted:
+          // Permission restricted (iOS parental controls, etc.)
+          _showErrorDialog(
+            'Permission Restricted',
+            'Microphone access is restricted on this device. This may be due to parental controls or device management settings.',
+          );
+          break;
+
+        case PermissionStatus.limited:
+          // Limited permission (iOS 14+) - treat as granted
+          await _startRecording();
+          break;
+
+        default:
+          _showErrorDialog(
+            'Permission Error',
+            'Unable to determine microphone permission status. Please check your device settings.',
+            actionLabel: 'Open Settings',
+            onAction: () => openAppSettings(),
+          );
       }
+    } catch (e) {
+      print('❌ Error handling permission: $e');
+      _showErrorDialog(
+        'Permission Error',
+        'An error occurred while checking microphone permissions: $e',
+        actionLabel: 'Try Again',
+        onAction: () => _handlePermissionAndStartRecording(),
+      );
     }
   }
 
   Future<void> _startRecording() async {
     print('💬 Starting recording...');
     try {
-      final result = await startAudioRecording(
-        context,
-      );
+      // Show loading state
+      _showSnackBar('Starting recording...');
+      
+      final result = await startAudioRecording(context);
       print('💬 Start recording result: $result');
 
       if (result.startsWith('error')) {
-        _showSnackBar('Error starting recording: ${result.substring(7)}');
+        final errorMsg = result.substring(7);
+        print('❌ Recording start failed: $errorMsg');
+        
+        // Provide specific error feedback
+        if (errorMsg.contains('permission')) {
+          _showErrorDialog(
+            'Permission Error',
+            'Microphone permission was denied or revoked.',
+            actionLabel: 'Check Settings',
+            onAction: () => openAppSettings(),
+          );
+        } else if (errorMsg.contains('already recording')) {
+          _showSnackBar('Recording is already in progress');
+        } else {
+          _showErrorDialog(
+            'Recording Error',
+            'Failed to start recording: $errorMsg',
+            actionLabel: 'Try Again',
+            onAction: () => _startRecording(),
+          );
+        }
         return;
       }
 
-      // Update app state
+      // Update app state on successful start
       FFAppState().update(() {
         FFAppState().isRecording = true;
       });
+      
+      _showSnackBar('Recording started');
     } catch (e) {
       print('❌ Error starting recording: $e');
-      _showSnackBar('Error: $e');
+      _showErrorDialog(
+        'Recording Error',
+        'An unexpected error occurred: $e',
+        actionLabel: 'Try Again',
+        onAction: () => _startRecording(),
+      );
     }
   }
 
