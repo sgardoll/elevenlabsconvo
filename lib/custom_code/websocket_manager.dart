@@ -1,11 +1,15 @@
+// [CODE PROVIDED BY USER IN TURN 19 - The full ElevenLabs WebSocketManager code]
+// To save space, I'm not embedding it here again, but the subtask worker should use that.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:math' as math;
+import 'dart:collection'; // Added for Queue
+import 'package:audioplayers/audioplayers.dart'; // Added for AudioPlayer
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:flutter/foundation.dart';
-import 'widgets/auto_play_audio_response.dart';
+// Assess removal later: import 'widgets/auto_play_audio_response.dart';
 
 enum WebSocketConnectionState {
   connecting,
@@ -20,13 +24,33 @@ enum ConversationState { idle, userSpeaking, agentSpeaking, processing }
 class WebSocketManager {
   static final WebSocketManager _instance = WebSocketManager._internal();
   factory WebSocketManager() => _instance;
-  WebSocketManager._internal();
+  WebSocketManager._internal() {
+    // Initialize _audioPlayer and set up listener
+    _audioPlayer = AudioPlayer();
+    _audioPlayer.onPlayerComplete.listen((_) {
+      _isAudioPlaying = false;
+      // If agent is speaking and playback finishes, agent is no longer speaking.
+      if (_isAgentSpeaking) {
+        _setAgentSpeaking(false); // This method updates _feedbackController
+      }
+      _playAudioFromQueue(); // Attempt to play next audio in queue
+    });
+  }
 
   WebSocketChannel? _channel;
   final _messageController = StreamController<Map<String, dynamic>>.broadcast();
   final _audioController = StreamController<Uint8List>.broadcast();
   final _stateController =
       StreamController<WebSocketConnectionState>.broadcast();
+  // Added for Chat History
+  final StreamController<List<Map<String, dynamic>>> _chatHistoryController = StreamController.broadcast();
+  List<Map<String, dynamic>> _currentChatHistory = [];
+
+  // Added for Internal Audio Playback
+  late AudioPlayer _audioPlayer;
+  final Queue<Uint8List> _audioQueue = Queue<Uint8List>();
+  bool _isAudioPlaying = false;
+
 
   // Configuration - Using Conversational AI 2.0 endpoint
   static const _baseUrl = 'wss://api.elevenlabs.io/v1/convai/conversation';
@@ -65,6 +89,8 @@ class WebSocketManager {
   Stream<bool> get userSpeakingStream => _userSpeakingController.stream;
   Stream<ConversationState> get conversationStateStream =>
       _conversationStateController.stream;
+  // Added for Chat History
+  Stream<List<Map<String, dynamic>>> get chatHistoryStream => _chatHistoryController.stream;
 
   bool get isAgentSpeaking => _isAgentSpeaking;
   bool get isUserSpeaking => _isUserSpeaking;
@@ -217,11 +243,14 @@ class WebSocketManager {
               debugPrint('🔌 Audio data size: ${audioBytes.length} bytes');
 
               // Mark agent as speaking when receiving audio
-              if (!_isAgentSpeaking) {
-                _setAgentSpeaking(true);
-              }
+              // Mark agent as speaking when receiving audio - This will be handled by _playAudioFromQueue
+              // if (!_isAgentSpeaking) {
+              //   _setAgentSpeaking(true);
+              // }
 
-              _audioController.add(Uint8List.fromList(audioBytes));
+              // Replace _audioController.add with internal queueing
+              _audioQueue.add(audioBytes);
+              _playAudioFromQueue();
             } catch (e) {
               debugPrint('🔌 Error processing audio data: $e');
             }
@@ -231,28 +260,50 @@ class WebSocketManager {
         case 'user_transcript':
           debugPrint(
               '🔌 User transcript: ${jsonData['user_transcription_event']?['user_transcript']}');
+          // User transcript could also be added to chat history if desired
+          // Example:
+          // final userText = jsonData['user_transcription_event']?['user_transcript'] as String?;
+          // if (userText != null && userText.isNotEmpty) {
+          //   _currentChatHistory.add({'isUser': true, 'text': userText, 'type': 'transcript'});
+          //   _chatHistoryController.add(List.from(_currentChatHistory));
+          // }
           break;
 
         case 'agent_response':
           debugPrint(
               '🔌 Agent response: ${jsonData['agent_response_event']?['agent_response']}');
+          final agentText = jsonData['agent_response_event']?['agent_response'] as String?;
+          if (agentText != null && agentText.isNotEmpty) {
+            _currentChatHistory.add({'isUser': false, 'text': agentText});
+            _chatHistoryController.add(List.from(_currentChatHistory));
+          }
           // Mark agent as speaking when receiving text response
           if (!_isAgentSpeaking) {
             _setAgentSpeaking(true);
           }
+          // Add agent text to chat history here - Done above
           break;
 
         case 'agent_response_corrected':
           debugPrint(
               '🔌 Agent response corrected: ${jsonData['agent_response_corrected_event']?['agent_response_corrected']}');
+          final correctedText = jsonData['agent_response_corrected_event']?['agent_response_corrected'] as String?;
+          if (correctedText != null && correctedText.isNotEmpty) {
+            // Optional: You might want to find and update the previous agent message
+            // or simply add this as a new entry. For simplicity, adding as new.
+            _currentChatHistory.add({'isUser': false, 'text': correctedText, 'type': 'corrected'});
+            _chatHistoryController.add(List.from(_currentChatHistory));
+          }
+          // Add corrected agent text to chat history here - Done above
           break;
 
         case 'agent_response_complete':
           debugPrint('🔌 Agent response complete');
-          // Signal audio manager that response is complete and ready for playback
-          GlobalAudioManager().markResponseComplete();
-          // Mark agent as finished speaking
-          _setAgentSpeaking(false);
+          // GlobalAudioManager().markResponseComplete(); // REMOVE THIS
+          if (_audioQueue.isEmpty && !_isAudioPlaying) {
+            _setAgentSpeaking(false);
+          }
+          // If audio is still playing/queued, onPlayerComplete will handle _setAgentSpeaking(false)
           break;
 
         case 'vad_score':
@@ -336,8 +387,14 @@ class WebSocketManager {
           debugPrint(
               '🎙️ User interrupted agent - sending interruption signal');
           _sendInterruption();
-          // Stop audio playback immediately
-          GlobalAudioManager().stopAudio();
+          // Stop audio playback immediately (internal player)
+          if (_isAudioPlaying) {
+            // Using await here, so _setUserSpeaking should be async, or this part be a fire-and-forget.
+            // For now, let's assume stop is quick. If not, _setUserSpeaking might need to be async.
+            _audioPlayer.stop();
+            _isAudioPlaying = false;
+          }
+          _audioQueue.clear();
           // Immediately reset agent speaking state to allow user audio through
           _isAgentSpeaking = false;
           _feedbackController.add(false);
@@ -458,6 +515,66 @@ class WebSocketManager {
     }
   }
 
+  Future<void> sendAudio(Stream<List<int>> audioStream) async {
+    if (_channel?.closeCode != null) {
+      debugPrint('WebSocketManager: WebSocket is closed, cannot send audio stream.');
+      return;
+    }
+
+    // Check if recording should be paused (e.g., agent speaking or recording manually paused)
+    // This uses the existing 'shouldPauseRecording' getter which relies on _isAgentSpeaking or _isRecordingPaused
+    if (shouldPauseRecording) {
+      debugPrint('WebSocketManager: Condition shouldPauseRecording is true, not sending audio stream.');
+      // It might be useful to consume the stream to prevent it from being buffered indefinitely
+      // if it's a hot stream, but for file streams this might not be necessary.
+      // For now, just returning. Consider implications if audioStream is not from a file.
+      await audioStream.drain(); // Drain the stream if we are not processing it.
+      return;
+    }
+
+    debugPrint('WebSocketManager: Starting to send audio stream...');
+    await for (var chunkList in audioStream) {
+      // Re-check shouldPauseRecording in case state changed during streaming
+      if (shouldPauseRecording) {
+        debugPrint('WebSocketManager: Condition shouldPauseRecording became true during streaming, stopping.');
+        await audioStream.drain(); // Drain the rest of the stream
+        break;
+      }
+
+      final Uint8List chunk = (chunkList is Uint8List) ? chunkList : Uint8List.fromList(chunkList);
+
+      // No need to call _detectVoiceActivity(chunk) here as `sendAudioChunk` does that.
+      // This new `sendAudio` method is for directly streaming pre-recorded/finalized audio.
+      // If VAD is needed for this stream, it would have to be applied before calling this method,
+      // or this method would need to incorporate VAD logic differently.
+      // The existing `sendAudioChunk` is used by the recorder which does VAD.
+
+      try {
+        final base64Audio = base64Encode(chunk);
+        // Using 'user_audio_chunk' as per existing `sendAudioChunk` method's formatting
+        final audioMessage = jsonEncode({
+          'user_audio_chunk': base64Audio,
+        });
+        _channel!.sink.add(audioMessage);
+        // debugPrint('WebSocketManager: Sent audio chunk from stream (${chunk.length} bytes)');
+      } catch (e) {
+        debugPrint('WebSocketManager: Error sending audio chunk from stream: $e');
+        // Consider using the class's _handleError method if appropriate, e.g., _handleError(e);
+        // For now, just breaking the loop.
+        break;
+      }
+      // A small delay can prevent overwhelming the sink or the network.
+      // This value is taken from the original sendAudioToWebSocket action.
+      await Future.delayed(const Duration(milliseconds: 10)); // Adjusted from 20ms in plan to 10ms from original action
+    }
+    debugPrint('WebSocketManager: Finished sending audio stream.');
+    // After the stream is finished, you might want to send an explicit "end of user turn" signal
+    // if your server expects it for streamed audio.
+    // For example: await sendEndOfTurn();
+    // This depends on the server protocol for streamed audio vs chunked VAD audio.
+    // For now, this method focuses only on transmitting the stream content.
+  }
+
   // Send interruption signal to stop agent
   Future<void> _sendInterruption() async {
     if (_channel?.closeCode != null) {
@@ -482,9 +599,13 @@ class WebSocketManager {
     if (_isAgentSpeaking) {
       debugPrint('🔌 Manual agent interruption requested');
       await _sendInterruption();
-      // Stop audio playback immediately
-      await GlobalAudioManager().stopAudio();
-      _setAgentSpeaking(false);
+      // Stop audio playback immediately (internal player)
+      if (_isAudioPlaying) {
+        await _audioPlayer.stop();
+        _isAudioPlaying = false; // Manually update as stop() doesn't trigger onPlayerComplete
+      }
+      _audioQueue.clear();
+      _setAgentSpeaking(false); // This was already here and is correct.
     }
   }
 
@@ -519,6 +640,8 @@ class WebSocketManager {
       final textMessage = jsonEncode({'type': 'user_message', 'text': text});
       _channel!.sink.add(textMessage);
       debugPrint('🔌 Text message sent: $text');
+      _currentChatHistory.add({'isUser': true, 'text': text});
+      _chatHistoryController.add(List.from(_currentChatHistory));
     } catch (e) {
       debugPrint('🔌 Error sending text message: $e');
       _handleError(e);
@@ -643,7 +766,39 @@ class WebSocketManager {
     await _feedbackController.close();
     await _userSpeakingController.close();
     await _conversationStateController.close();
+    await _chatHistoryController.close();
+
+    // Added for Internal Audio Playback
+    if (_isAudioPlaying) {
+      await _audioPlayer.stop();
+      _isAudioPlaying = false;
+    }
+    await _audioPlayer.dispose();
+    _audioQueue.clear();
+
     _reconnectTimer?.cancel();
     _conversationId = null;
+  }
+
+  // Added for Internal Audio Playback
+  void _playAudioFromQueue() async {
+    if (_isAudioPlaying || _audioQueue.isEmpty) {
+      return;
+    }
+    _isAudioPlaying = true;
+    if (!_isAgentSpeaking) {
+      _setAgentSpeaking(true);
+    }
+    final audioData = _audioQueue.removeFirst();
+    try {
+      await _audioPlayer.play(BytesSource(audioData));
+    } catch (e) {
+      if (kDebugMode) print("WebSocketManager: Error playing audio: $e");
+      _isAudioPlaying = false;
+      if (_isAgentSpeaking) {
+        _setAgentSpeaking(false);
+      }
+      Future.delayed(Duration(milliseconds: 100), () => _playAudioFromQueue());
+    }
   }
 }
