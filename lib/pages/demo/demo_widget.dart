@@ -90,14 +90,8 @@ class _DemoWidgetState extends State<DemoWidget> {
               child: custom_widgets.ElevenLabsConversationWidget(
                 width: 200.0,
                 height: 200.0,
-                apiKey: valueOrDefault<String>(
-                  FFLibraryValues().elevenlabsApiKey,
-                  'sk_de69572a605e00c5179d00c893a6486c00e4ebef0d66f12b',
-                ),
-                agentId: valueOrDefault<String>(
-                  FFLibraryValues().elevenLabsAgentId,
-                  'agent_01jy39g9vxf9sske18f1959njc',
-                ),
+                apiKey: FFLibraryValues().elevenlabsApiKey,
+                agentId: FFLibraryValues().elevenLabsAgentId,
                 iconSize: 38.0,
                 showStatusText: true,
                 enableHapticFeedback: true,
