@@ -50,7 +50,7 @@ dependencies:
   google_fonts: 6.1.0
   intl: 0.19.0
   json_path: 0.7.2
-  just_audio: ^0.9.35
+  just_audio: ^0.9.36
   page_transition: 2.1.0
   path_provider: 2.1.4
   path_provider_android: 2.2.10
@@ -65,7 +65,7 @@ dependencies:
   permission_handler_platform_interface: 4.2.3
   permission_handler_windows: 0.2.1
   provider: 6.1.2
-  record: ^6.0.0
+  record: ^5.0.4
   shared_preferences: 2.3.2
   shared_preferences_android: 2.3.2
   shared_preferences_foundation: 2.5.2
@@ -86,7 +86,7 @@ dependencies:
   url_launcher_platform_interface: 2.3.2
   url_launcher_web: 2.3.3
   url_launcher_windows: 3.1.2
-  web_socket_channel: ^3.0.0
+  web_socket_channel: ^2.4.0
   xml: 6.5.0
 
   # The following adds the Cupertino Icons font to your application.

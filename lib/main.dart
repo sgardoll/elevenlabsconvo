@@ -49,7 +49,6 @@ class _MyAppState extends State<MyApp> {
       _router.routerDelegate.currentConfiguration.matches
           .map((e) => getRoute(e))
           .toList();
-
   bool displaySplashImage = true;
 
   @override

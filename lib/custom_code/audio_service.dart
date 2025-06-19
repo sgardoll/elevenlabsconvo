@@ -1,290 +1,222 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
-import 'dart:collection';
-import 'dart:io';
-import 'package:path_provider/path_provider.dart';
-import 'package:just_audio/just_audio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:just_audio/just_audio.dart';
+import 'conversation_state_manager.dart';
 
-class AudioService {
-  // Singleton instance
-  static final AudioService instance = AudioService._privateConstructor();
-  
-  AudioService._privateConstructor();
+// Custom StreamAudioSource for continuous audio streaming
+class PersistentAudioSource extends StreamAudioSource {
+  final StreamController<List<int>> _controller =
+      StreamController<List<int>>.broadcast();
+  final List<int> _audioBuffer = [];
+  bool _isFirstChunk = true;
+  bool _isDisposed = false;
 
-  // State streams
-  final StreamController<bool> _isPlayingController = StreamController<bool>.broadcast();
-  Stream<bool> get isPlayingStream => _isPlayingController.stream;
-
-  final StreamController<bool> _isBufferingController = StreamController<bool>.broadcast();
-  Stream<bool> get isBufferingStream => _isBufferingController.stream;
-
-  final StreamController<String> _currentTrackController = StreamController<String>.broadcast();
-  Stream<String> get currentTrackStream => _currentTrackController.stream;
-
-  // Internal state
-  AudioPlayer? _player;
-  File? _currentTempFile;
-  final Queue<Uint8List> _audioBuffer = Queue<Uint8List>();
-  bool _isPlaying = false;
-  bool _isBuffering = false;
-  bool _isInterrupted = false;
-  Timer? _playbackTimer;
-  bool _hasStartedPlayback = false;
-  bool _isResponseComplete = false;
-
-  // Buffer management configuration
-  static const int _maxBufferChunks = 10;
-  static const int _playbackDelayMs = 1500;
-
-  // Getters for current state
-  bool get isPlaying => _isPlaying;
-  bool get isBuffering => _isBuffering;
-  bool get isInterrupted => _isInterrupted;
-
-  Future<void> initialize() async {
-    if (_player != null) return;
-    
-    _player = AudioPlayer();
-    
-    // Listen to player state changes
-    _player!.playerStateStream.listen((state) {
-      final wasPlaying = _isPlaying;
-      _isPlaying = state.playing;
-      
-      if (wasPlaying != _isPlaying) {
-        _isPlayingController.add(_isPlaying);
-      }
-
-      if (state.processingState == ProcessingState.completed) {
-        _onPlaybackCompleted();
+  PersistentAudioSource() {
+    _controller.stream.listen((chunk) {
+      if (!_isDisposed) {
+        _audioBuffer.addAll(chunk);
       }
     });
-
-    if (kDebugMode) print('🔊 AudioService initialized');
   }
 
-  Future<void> queueAudioChunk(String base64Audio) async {
-    if (_isInterrupted) {
-      if (kDebugMode) print('🔊 Skipping audio chunk - interrupted');
-      return;
-    }
+  void addAudioChunk(String base64Audio) {
+    if (_isDisposed || _controller.isClosed) return;
 
     try {
       final audioBytes = base64Decode(base64Audio);
-      if (audioBytes.isEmpty) return;
+      debugPrint('🔊 Adding audio chunk: ${audioBytes.length} bytes');
 
-      _audioBuffer.add(audioBytes);
+      if (audioBytes.isNotEmpty) {
+        _controller.add(audioBytes);
 
-      if (kDebugMode) print('🔊 Queued audio chunk: ${audioBytes.length} bytes (total chunks: ${_audioBuffer.length})');
-
-      // Start playback if conditions are met
-      if (!_hasStartedPlayback && !_isPlaying) {
-        _schedulePlayback();
+        // Start playback only once when first chunk arrives
+        if (_isFirstChunk) {
+          _isFirstChunk = false;
+          debugPrint('🔊 First audio chunk received, triggering playback');
+        }
       }
     } catch (e) {
-      if (kDebugMode) print('❌ Error queuing audio chunk: $e');
+      debugPrint('❌ Error decoding audio chunk: $e');
+    }
+  }
+
+  @override
+  Future<StreamAudioResponse> request([int? start, int? end]) async {
+    start ??= 0;
+    end ??= _audioBuffer.length;
+
+    if (start >= _audioBuffer.length) {
+      // Return empty stream if requesting beyond available data
+      return StreamAudioResponse(
+        sourceLength: null,
+        contentLength: 0,
+        offset: start,
+        stream: Stream.empty(),
+        contentType: 'audio/wav',
+      );
+    }
+
+    end = end > _audioBuffer.length ? _audioBuffer.length : end;
+
+    return StreamAudioResponse(
+      sourceLength: null, // Dynamic content length
+      contentLength: end - start,
+      offset: start,
+      stream: Stream.value(_audioBuffer.sublist(start, end)),
+      contentType: 'audio/wav',
+    );
+  }
+
+  void reset() {
+    _audioBuffer.clear();
+    _isFirstChunk = true;
+    debugPrint('🔊 Audio source reset');
+  }
+
+  void dispose() {
+    _isDisposed = true;
+    if (!_controller.isClosed) {
+      _controller.close();
+    }
+  }
+}
+
+class AudioService {
+  static final AudioService _instance = AudioService._internal();
+  factory AudioService() => _instance;
+  AudioService._internal() {
+    _stateManager.setOnUserFinishedSpeaking(_onUserFinishedSpeaking);
+    _player.playerStateStream.listen(_onPlayerStateChanged);
+  }
+
+  final _stateManager = ConversationStateManager();
+  final _player = AudioPlayer();
+
+  PersistentAudioSource? _audioSource;
+  bool _isInitialized = false;
+  bool _isPlaying = false;
+
+  Future<void> initialize() async {
+    if (_isInitialized) return;
+
+    debugPrint('🔊 Initializing AudioService with persistent audio source');
+
+    try {
+      _audioSource = PersistentAudioSource();
+      await _player.setAudioSource(_audioSource!);
+      _isInitialized = true;
+      debugPrint('🔊 AudioService initialized successfully');
+    } catch (e) {
+      debugPrint('❌ Failed to initialize AudioService: $e');
+      _stateManager.reportError('Audio initialization failed: $e');
+    }
+  }
+
+  void addAudioChunk(Uint8List audioData) {
+    if (!_isInitialized || _stateManager.isInterrupting) return;
+
+    try {
+      final base64Audio = base64Encode(audioData);
+      _audioSource?.addAudioChunk(base64Audio);
+
+      // Start playback if not already playing
+      if (!_isPlaying && !_player.playing) {
+        _startPlayback();
+      }
+    } catch (e) {
+      debugPrint('❌ Error adding audio chunk: $e');
     }
   }
 
   void markResponseComplete() {
-    if (_isInterrupted) return;
-    
-    _isResponseComplete = true;
-    if (kDebugMode) print('🔊 Audio response marked complete');
-    
-    if (!_hasStartedPlayback && !_isPlaying && _audioBuffer.isNotEmpty) {
-      _startPlayback();
-    }
+    debugPrint('✅ Agent response complete - audio streaming finished');
+    // No action needed for persistent source, it continues streaming
   }
 
-  void _schedulePlayback() {
-    if (_isInterrupted || _playbackTimer != null) return;
-
-    if (_audioBuffer.length >= _maxBufferChunks || _isResponseComplete) {
+  // Called from RecordingService AFTER the recorder is confirmed to be stopped.
+  void playBufferedAudio() {
+    if (_isInitialized && !_isPlaying && !_player.playing) {
       _startPlayback();
-    } else {
-      _playbackTimer = Timer(Duration(milliseconds: _playbackDelayMs), () {
-        if (_audioBuffer.isNotEmpty && !_isPlaying && !_isInterrupted) {
-          _startPlayback();
-        }
-      });
     }
   }
 
   Future<void> _startPlayback() async {
-    if (_isPlaying || _audioBuffer.isEmpty || _isInterrupted) return;
-
-    await initialize(); // Ensure player is initialized
-
-    _hasStartedPlayback = true;
-    _playbackTimer?.cancel();
-    _playbackTimer = null;
-    _isResponseComplete = false;
+    if (!_isInitialized || _isPlaying) return;
 
     try {
-      _updateBuffering(true);
-      
-      // Concatenate all buffered audio chunks
-      final concatenatedAudio = _concatenateAudioChunks();
-      if (concatenatedAudio.isEmpty) {
-        _updateBuffering(false);
-        return;
-      }
+      _isPlaying = true;
+      _stateManager.agentPlaybackStarted();
 
-      // Clean up previous resources
-      await _cleanup();
-
-      // Create temporary WAV file
-      final tempDir = await getTemporaryDirectory();
-      _currentTempFile = File(
-        '${tempDir.path}/temp_audio_${DateTime.now().millisecondsSinceEpoch}.wav'
-      );
-
-      final wavHeader = _createWavHeader(concatenatedAudio.length);
-      final wavData = Uint8List.fromList([...wavHeader, ...concatenatedAudio]);
-      await _currentTempFile!.writeAsBytes(wavData);
-
-      if (kDebugMode) print('🔊 Playing audio: ${concatenatedAudio.length} bytes from ${_audioBuffer.length} chunks');
-
-      // Start playback
-      await _player!.setFilePath(_currentTempFile!.path);
-      _updateBuffering(false);
-      
-      _currentTrackController.add(_currentTempFile!.path);
-      await _player!.play();
-
-      // Clear the buffer since this audio is now playing
-      _audioBuffer.clear();
-
+      debugPrint('🔊 Starting audio playback');
+      await _player.play();
     } catch (e) {
-      if (kDebugMode) print('❌ Error in audio playback: $e');
-      _updateBuffering(false);
-      await _cleanup();
+      debugPrint('❌ Audio playback failed: $e');
+      _stateManager.reportError('Audio playback failed: $e');
+      _onPlaybackComplete();
     }
   }
 
-  Uint8List _concatenateAudioChunks() {
-    if (_audioBuffer.isEmpty) return Uint8List(0);
+  void _onPlayerStateChanged(PlayerState state) {
+    debugPrint('🔊 Player state changed: ${state.processingState}');
 
-    int totalLength = _audioBuffer.fold(0, (sum, chunk) => sum + chunk.length);
-    final concatenated = Uint8List(totalLength);
-    
-    int offset = 0;
-    for (final chunk in _audioBuffer) {
-      concatenated.setRange(offset, offset + chunk.length, chunk);
-      offset += chunk.length;
-    }
-
-    return concatenated;
-  }
-
-  List<int> _createWavHeader(int dataLength) {
-    const sampleRate = 16000;
-    const numChannels = 1;
-    const bitsPerSample = 16;
-    const byteRate = sampleRate * numChannels * bitsPerSample ~/ 8;
-    const blockAlign = numChannels * bitsPerSample ~/ 8;
-    final totalLength = 36 + dataLength;
-
-    return [
-      // "RIFF" chunk descriptor
-      0x52, 0x49, 0x46, 0x46, // "RIFF"
-      totalLength & 0xFF, (totalLength >> 8) & 0xFF,
-      (totalLength >> 16) & 0xFF, (totalLength >> 24) & 0xFF,
-      0x57, 0x41, 0x56, 0x45, // "WAVE"
-
-      // "fmt " sub-chunk
-      0x66, 0x6D, 0x74, 0x20, // "fmt "
-      16, 0, 0, 0, // Sub-chunk size (16 for PCM)
-      1, 0, // Audio format (1 for PCM)
-      numChannels, 0, // Number of channels
-      sampleRate & 0xFF, (sampleRate >> 8) & 0xFF,
-      (sampleRate >> 16) & 0xFF, (sampleRate >> 24) & 0xFF,
-      byteRate & 0xFF, (byteRate >> 8) & 0xFF,
-      (byteRate >> 16) & 0xFF, (byteRate >> 24) & 0xFF,
-      blockAlign, 0, // Block align
-      bitsPerSample, 0, // Bits per sample
-
-      // "data" sub-chunk
-      0x64, 0x61, 0x74, 0x61, // "data"
-      dataLength & 0xFF, (dataLength >> 8) & 0xFF,
-      (dataLength >> 16) & 0xFF, (dataLength >> 24) & 0xFF,
-    ];
-  }
-
-  Future<void> _cleanup() async {
-    try {
-      if (_currentTempFile != null && await _currentTempFile!.exists()) {
-        await _currentTempFile!.delete();
-        _currentTempFile = null;
-      }
-    } catch (e) {
-      if (kDebugMode) print('🔊 Error during cleanup: $e');
+    if (state.processingState == ProcessingState.completed) {
+      _onPlaybackComplete();
+    } else if (state.processingState == ProcessingState.idle) {
+      _isPlaying = false;
     }
   }
 
-  void _onPlaybackCompleted() {
-    if (kDebugMode) print('🔊 Audio playback completed');
-    _hasStartedPlayback = false;
-    _cleanup();
-  }
+  Future<void> _onPlaybackComplete() async {
+    debugPrint('🔊 Playback complete');
+    _isPlaying = false;
 
-  Future<void> stop() async {
-    if (kDebugMode) print('🔊 Stopping audio playback');
-    
-    _isInterrupted = true;
-    _hasStartedPlayback = false;
-    _isResponseComplete = false;
-    
-    _playbackTimer?.cancel();
-    _playbackTimer = null;
-    _audioBuffer.clear();
-
-    if (_player != null) {
-      await _player!.stop();
-    }
-
-    await _cleanup();
-    _updateBuffering(false);
-  }
-
-  void resetInterruptedState() {
-    if (kDebugMode) print('🔊 Resetting interrupted state');
-    _isInterrupted = false;
-    _hasStartedPlayback = false;
-    _isResponseComplete = false;
-    _audioBuffer.clear();
-    _playbackTimer?.cancel();
-    _playbackTimer = null;
-  }
-
-  Future<void> pause() async {
-    if (_player != null) {
-      await _player!.pause();
+    // Only transition state if we were the ones playing
+    if (_stateManager.conversationState == ConversationState.agentSpeaking) {
+      _stateManager.agentPlaybackFinished();
     }
   }
 
-  Future<void> resume() async {
-    if (_player != null) {
-      await _player!.play();
+  Future<void> stopPlayback({bool clearBuffer = false}) async {
+    debugPrint('🛑 Stopping audio playback. Clear buffer: $clearBuffer');
+
+    _isPlaying = false;
+
+    if (clearBuffer && _audioSource != null) {
+      _audioSource!.reset();
+    }
+
+    if (_player.playing) {
+      await _player.stop();
     }
   }
 
-  void _updateBuffering(bool buffering) {
-    if (_isBuffering != buffering) {
-      _isBuffering = buffering;
-      _isBufferingController.add(buffering);
+  Future<void> resetForNewConversation() async {
+    debugPrint('🔄 Resetting audio service for new conversation');
+
+    await stopPlayback(clearBuffer: true);
+
+    if (_audioSource != null) {
+      _audioSource!.dispose();
+    }
+
+    // Reinitialize for new conversation
+    _isInitialized = false;
+    await initialize();
+  }
+
+  void _onUserFinishedSpeaking() {
+    debugPrint('🎙️ User finished speaking - checking for pending audio');
+    if (_isInitialized && !_isPlaying && !_player.playing) {
+      _startPlayback();
     }
   }
 
   void dispose() {
-    stop();
-    _isPlayingController.close();
-    _isBufferingController.close();
-    _currentTrackController.close();
-    _player?.dispose();
-    _player = null;
+    _isPlaying = false;
+    _player.dispose();
+    _audioSource?.dispose();
+    _isInitialized = false;
   }
 }
