@@ -43,14 +43,24 @@
     <string>This app requires permission to Bluetooth to communicate with AI</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>This app requires microphone access for voice conversations with AI</string>
-    <key>NSLocalNetworkUsageDescription</key>
-    <string>This app uses your local network for communication with AI services</string>
     <!-- Start of UIBackgroundModes -->
     <key>UIBackgroundModes</key>
     <array>
       <string>audio</string>
     </array>
     <!-- End of UIBackgroundModes -->
+    <!-- Start of NSLocalNetworkUsageDescription -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>This app uses the local network to connect to Flutter's debugging tools.</string>
+    <!-- End of NSLocalNetworkUsageDescription -->
+    <!-- Start of NSAppTransportSecurity -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+      <key>NSAllowsArbitraryLoads</key>
+      <true/>
+    </dict>
+    <key>NSMicrophoneUsageDescription</key>
+    <!-- End of NSAppTransportSecurity -->
     <key>UILaunchStoryboardName</key>
     <string>LaunchScreen</string>
     <key>UIMainStoryboardFile</key>
