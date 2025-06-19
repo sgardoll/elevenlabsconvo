@@ -2,111 +2,140 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:math' as math;
+import 'dart:collection';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:flutter/foundation.dart';
 import 'widgets/auto_play_audio_response.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'audio_service.dart';
 
-enum WebSocketConnectionState {
-  connecting,
-  connected,
-  disconnected,
-  reconnecting,
-  error
-}
+// Enum for connection status
+enum ConnectionStatus { disconnected, connecting, connected, error }
 
+// Enum for conversation state
 enum ConversationState { idle, userSpeaking, agentSpeaking, processing }
 
+// Data models for better type safety
+class ChatMessage {
+  final String id;
+  final bool isUser;
+  final String text;
+  final DateTime timestamp;
+  final Map<String, dynamic>? metadata;
+
+  ChatMessage({
+    required this.id,
+    required this.isUser,
+    required this.text,
+    required this.timestamp,
+    this.metadata,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'isUser': isUser,
+    'text': text,
+    'timestamp': timestamp.millisecondsSinceEpoch,
+    'metadata': metadata,
+  };
+}
+
 class WebSocketManager {
-  static final WebSocketManager _instance = WebSocketManager._internal();
-  factory WebSocketManager() => _instance;
-  WebSocketManager._internal();
+  // Private constructor
+  WebSocketManager._privateConstructor() {
+    // Initialize audio service
+    _audioService = AudioService.instance;
+  }
 
-  WebSocketChannel? _channel;
-  final _messageController = StreamController<Map<String, dynamic>>.broadcast();
-  final _audioController = StreamController<Uint8List>.broadcast();
-  final _stateController =
-      StreamController<WebSocketConnectionState>.broadcast();
+  // Singleton instance
+  static final WebSocketManager instance = WebSocketManager._privateConstructor();
 
-  // Configuration - Using Conversational AI 2.0 endpoint
+  // Public state streams
+  final StreamController<List<ChatMessage>> _chatHistoryController = 
+      StreamController<List<ChatMessage>>.broadcast();
+  Stream<List<ChatMessage>> get chatHistoryStream => _chatHistoryController.stream;
+
+  final StreamController<ConnectionStatus> _connectionStatusController = 
+      StreamController<ConnectionStatus>.broadcast();
+  Stream<ConnectionStatus> get connectionStatusStream => _connectionStatusController.stream;
+
+  final StreamController<ConversationState> _conversationStateController = 
+      StreamController<ConversationState>.broadcast();
+  Stream<ConversationState> get conversationStateStream => _conversationStateController.stream;
+
+  final StreamController<bool> _isBotSpeakingController = 
+      StreamController<bool>.broadcast();
+  Stream<bool> get isBotSpeakingStream => _isBotSpeakingController.stream;
+
+  final StreamController<bool> _isUserSpeakingController = 
+      StreamController<bool>.broadcast();
+  Stream<bool> get isUserSpeakingStream => _isUserSpeakingController.stream;
+
+  final StreamController<double> _vadScoreController = 
+      StreamController<double>.broadcast();
+  Stream<double> get vadScoreStream => _vadScoreController.stream;
+
+  // Internal state
+  IOWebSocketChannel? _channel;
+  late final AudioService _audioService;
+  List<ChatMessage> _currentChatHistory = [];
+  ConnectionStatus _connectionStatus = ConnectionStatus.disconnected;
+  ConversationState _conversationState = ConversationState.idle;
+  bool _isBotSpeaking = false;
+  bool _isUserSpeaking = false;
+
+  // Configuration
   static const _baseUrl = 'wss://api.elevenlabs.io/v1/convai/conversation';
   String _apiKey = '';
   String _agentId = '';
+  String? _conversationId;
   int _reconnectAttempts = 0;
   Timer? _reconnectTimer;
-  bool _initialized = false;
-  String? _conversationId;
-
-  // Audio feedback prevention and turn management
-  bool _isAgentSpeaking = false;
-  bool _isUserSpeaking = false;
-  bool _isRecordingPaused = false;
-  ConversationState _conversationState = ConversationState.idle;
-  Timer? _speechActivityTimer;
-  bool _agentRecentlySpeaking = false;
-  Timer? _agentGracePeriodTimer;
-
-  final _feedbackController = StreamController<bool>.broadcast();
-  final _userSpeakingController = StreamController<bool>.broadcast();
-  final _conversationStateController =
-      StreamController<ConversationState>.broadcast();
 
   // Voice activity detection
-  double _audioThreshold = 0.01; // Threshold for detecting voice activity
+  double _audioThreshold = 0.01;
   int _consecutiveSilentChunks = 0;
   int _consecutiveActiveChunks = 0;
   static const int _silenceThreshold = 15; // ~1.5 seconds at 10 chunks/sec
   static const int _speechThreshold = 3; // ~0.3 seconds to start speech
+  bool _agentRecentlySpeaking = false;
+  Timer? _agentGracePeriodTimer;
 
-  Stream<Map<String, dynamic>> get messageStream => _messageController.stream;
-  Stream<Uint8List> get audioStream => _audioController.stream;
-  Stream<WebSocketConnectionState> get stateStream => _stateController.stream;
-  Stream<bool> get agentSpeakingStream => _feedbackController.stream;
-  Stream<bool> get userSpeakingStream => _userSpeakingController.stream;
-  Stream<ConversationState> get conversationStateStream =>
-      _conversationStateController.stream;
-
-  bool get isAgentSpeaking => _isAgentSpeaking;
-  bool get isUserSpeaking => _isUserSpeaking;
-  bool get shouldPauseRecording => _isAgentSpeaking || _isRecordingPaused;
+  // Getters for current state
+  ConnectionStatus get connectionStatus => _connectionStatus;
   ConversationState get conversationState => _conversationState;
+  bool get isBotSpeaking => _isBotSpeaking;
+  bool get isUserSpeaking => _isUserSpeaking;
+  List<ChatMessage> get chatHistory => List.unmodifiable(_currentChatHistory);
 
-  WebSocketConnectionState get currentState => _channel?.closeCode != null
-      ? WebSocketConnectionState.disconnected
-      : _initialized
-          ? WebSocketConnectionState.connected
-          : WebSocketConnectionState.disconnected;
+  // Audio service getters
+  Stream<bool> get isPlayingAudioStream => _audioService.isPlayingStream;
+  Stream<bool> get isBufferingAudioStream => _audioService.isBufferingStream;
 
-  Future<void> initialize(
-      {required String apiKey, required String agentId}) async {
-    if (_apiKey == apiKey &&
-        _agentId == agentId &&
-        _initialized &&
-        _channel?.closeCode == null) {
-      debugPrint('🔌 WebSocket already initialized and connected');
-      return;
-    }
-
-    debugPrint(
-        '🔌 Initializing WebSocket with Conversational AI 2.0 - apiKey: ${apiKey.substring(0, 10)}... and agentId: $agentId');
+  Future<void> initialize({required String apiKey, required String agentId}) async {
+    if (kDebugMode) print('🔌 Initializing WebSocket with API key: ${apiKey.substring(0, 10)}... and agent ID: $agentId');
+    
     _apiKey = apiKey;
     _agentId = agentId;
-    await _connect();
-    _initialized = true;
+    
+    // Initialize audio service
+    await _audioService.initialize();
+    
+    await connect();
   }
 
-  Future<void> _connect() async {
-    debugPrint('🔌 Connecting to Conversational AI 2.0 WebSocket...');
-    _stateController.add(WebSocketConnectionState.connecting);
-
+  Future<void> connect() async {
+    if (_channel?.closeCode == null) {
+      if (kDebugMode) print('Already connected.');
+      return;
+    }
+    
+    _updateConnectionStatus(ConnectionStatus.connecting);
+    
     try {
-      // Conversational AI 2.0 endpoint with agent_id parameter
-      final uri =
-          Uri.parse('$_baseUrl?agent_id=${Uri.encodeComponent(_agentId)}');
-
-      debugPrint('🔌 Connecting to: $uri');
-
-      // API key in headers for secure authentication
+      final uri = Uri.parse('$_baseUrl?agent_id=${Uri.encodeComponent(_agentId)}');
+      
       _channel = IOWebSocketChannel.connect(
         uri,
         headers: {
@@ -114,536 +143,347 @@ class WebSocketManager {
           'User-Agent': 'ElevenLabs-Flutter-SDK/2.0',
         },
       );
+      
+      _updateConnectionStatus(ConnectionStatus.connected);
+      if (kDebugMode) print('WebSocket Connected');
 
-      debugPrint(
-          '🔌 WebSocket connected, setting up listeners for Conversational AI 2.0');
       _channel!.stream.listen(
-        _handleMessage,
-        onError: _handleError,
-        onDone: _handleDisconnect,
+        _onMessageReceived,
+        onError: (error) {
+          if (kDebugMode) print('WebSocket Error: $error');
+          _updateConnectionStatus(ConnectionStatus.error);
+          _handleDisconnect();
+        },
+        onDone: () {
+          if (kDebugMode) print('WebSocket Disconnected');
+          _updateConnectionStatus(ConnectionStatus.disconnected);
+        },
       );
 
-      debugPrint('🔌 Sending Conversational AI 2.0 initialization message');
       _sendInitialization();
-      _stateController.add(WebSocketConnectionState.connected);
-      _reconnectAttempts = 0;
     } catch (e) {
-      debugPrint('🔌 Error connecting to Conversational AI 2.0 WebSocket: $e');
-      _handleError(e);
+      if (kDebugMode) print('WebSocket connection error: $e');
+      _updateConnectionStatus(ConnectionStatus.error);
+      _scheduleReconnect();
     }
   }
 
   void _sendInitialization() {
-    // Conversational AI 2.0 initialization with enhanced features
     final initMessage = jsonEncode({
       'type': 'conversation_initiation_client_data',
       'conversation_config_override': {
         'agent': {
           'language': 'en',
-          // Use client-side VAD for better feedback control
           'turn_detection': {
-            'type':
-                'client_vad', // Switch to client_vad for manual turn control
-            'threshold': 0.6, // Adjust sensitivity
-            'silence_duration_ms':
-                800 // Shorter silence duration for faster interruption
+            'type': 'client_vad',
+            'threshold': 0.6,
+            'silence_duration_ms': 800
           }
         },
         'tts': {
-          // Leverage improved voice synthesis in v2.0
-          'model':
-              'eleven_turbo_v2_5', // Use latest v2.5 model for better performance
+          'model': 'eleven_turbo_v2_5',
         },
-        // Explicitly set audio formats to ensure compatibility
         'audio': {'input_format': 'pcm_16000', 'output_format': 'pcm_16000'}
       },
-      // Enable multimodal capabilities (Conversational AI 2.0 feature)
       'conversation_config': {
-        'modalities': [
-          'audio'
-        ], // Can be extended to ['audio', 'text'] for multimodal
+        'modalities': ['audio']
       }
     });
-    debugPrint('🔌 Sending Conversational AI 2.0 initialization: $initMessage');
-    _channel!.sink.add(initMessage);
+    
+    if (kDebugMode) print('🔌 Sending initialization: $initMessage');
+    _channel?.sink.add(initMessage);
   }
 
-  void _handleMessage(dynamic message) {
+  void _onMessageReceived(dynamic message) {
     try {
-      debugPrint(
-          '🔌 Received Conversational AI 2.0 message: ${message.toString().substring(0, math.min(200, message.toString().length))}...');
-      final jsonData = jsonDecode(message);
+      final messageJson = jsonDecode(message);
+      final messageType = messageJson['type'] ?? 'unknown';
+      
+      if (kDebugMode) print('🔌 Received message type: $messageType');
 
-      // Handle Conversational AI 2.0 message types
-      switch (jsonData['type']) {
+      switch (messageType) {
         case 'conversation_initiation_metadata':
-          // Store conversation ID for advanced v2.0 features
-          _conversationId = jsonData['conversation_initiation_metadata_event']
-              ?['conversation_id'];
-          debugPrint('🔌 Conversation ID: $_conversationId');
-          break;
-
-        case 'audio':
-          if (jsonData['audio_event'] != null) {
-            try {
-              final base64Audio = jsonData['audio_event']['audio_base_64'];
-
-              // Validate base64 audio data before processing
-              if (base64Audio == null || base64Audio.isEmpty) {
-                debugPrint('🔌 Received empty audio data, skipping');
-                break;
-              }
-
-              // For Conversational AI 2.0 streaming, even small chunks are valid
-              // Lower threshold to handle real-time audio streaming
-              if (base64Audio.length < 4) {
-                debugPrint(
-                    '🔌 Audio data too short (${base64Audio.length} chars), likely corrupted - skipping');
-                break;
-              }
-
-              final audioBytes = base64Decode(base64Audio);
-
-              // For Conversational AI 2.0, very small audio chunks are normal in streaming
-              // Only skip if completely empty
-              if (audioBytes.length < 2) {
-                debugPrint(
-                    '🔌 Decoded audio too small (${audioBytes.length} bytes), likely corrupted - skipping');
-                break;
-              }
-
-              debugPrint(
-                  '🔌 Received valid audio data from Conversational AI 2.0');
-              debugPrint('🔌 Audio data size: ${audioBytes.length} bytes');
-
-              // Mark agent as speaking when receiving audio
-              if (!_isAgentSpeaking) {
-                _setAgentSpeaking(true);
-              }
-
-              _audioController.add(Uint8List.fromList(audioBytes));
-            } catch (e) {
-              debugPrint('🔌 Error processing audio data: $e');
-            }
-          }
+          _conversationId = messageJson['conversation_initiation_metadata_event']?['conversation_id'];
+          if (kDebugMode) print('🔌 Conversation ID: $_conversationId');
+          _addSystemMessage('Conversation started');
           break;
 
         case 'user_transcript':
-          debugPrint(
-              '🔌 User transcript: ${jsonData['user_transcription_event']?['user_transcript']}');
+          final transcript = messageJson['user_transcription_event']?['user_transcript'];
+          if (transcript != null && transcript.isNotEmpty) {
+            _addUserMessage(transcript);
+          }
           break;
 
         case 'agent_response':
-          debugPrint(
-              '🔌 Agent response: ${jsonData['agent_response_event']?['agent_response']}');
-          // Mark agent as speaking when receiving text response
-          if (!_isAgentSpeaking) {
-            _setAgentSpeaking(true);
+          final response = messageJson['agent_response_event']?['agent_response'];
+          if (response != null && response.isNotEmpty) {
+            _addAgentMessage(response);
+            _updateBotSpeaking(true);
           }
-          break;
-
-        case 'agent_response_corrected':
-          debugPrint(
-              '🔌 Agent response corrected: ${jsonData['agent_response_corrected_event']?['agent_response_corrected']}');
           break;
 
         case 'agent_response_complete':
-          debugPrint('🔌 Agent response complete');
-          // Signal audio manager that response is complete and ready for playback
-          GlobalAudioManager().markResponseComplete();
-          // Mark agent as finished speaking
-          _setAgentSpeaking(false);
+          if (kDebugMode) print('🔌 Agent response complete');
+          _audioService.markResponseComplete();
+          _updateBotSpeaking(false);
+          break;
+
+        case 'audio':
+          if (messageJson['audio_event'] != null) {
+            _handleAudioData(messageJson['audio_event']['audio_base_64']);
+          }
           break;
 
         case 'vad_score':
-          // Voice Activity Detection score from Conversational AI 2.0
-          final vadScore = jsonData['vad_score_event']?['vad_score'];
-          debugPrint('🔌 VAD Score: $vadScore');
-          break;
-
-        case 'ping':
-          // Handle ping-pong for connection health
-          final pongMessage = jsonEncode(
-              {'type': 'pong', 'event_id': jsonData['ping_event']['event_id']});
-          _channel!.sink.add(pongMessage);
+          final vadScore = messageJson['vad_score_event']?['vad_score'];
+          if (vadScore != null) {
+            _vadScoreController.add(vadScore.toDouble());
+          }
           break;
 
         case 'interruption':
-          debugPrint(
-              '🔌 Conversation interrupted: ${jsonData['interruption_event']?['reason']}');
-          // Only reset agent speaking state if it's still true (might already be reset)
-          if (_isAgentSpeaking) {
-            _setAgentSpeaking(false);
-          }
+          if (kDebugMode) print('🔌 Conversation interrupted');
+          _updateBotSpeaking(false);
+          _audioService.stop();
           break;
 
-        case 'client_tool_call':
-          // Advanced Conversational AI 2.0 feature for tool integration
-          debugPrint(
-              '🔌 Tool call received: ${jsonData['client_tool_call']?['tool_name']}');
+        case 'ping':
+          final pongMessage = jsonEncode({
+            'type': 'pong', 
+            'event_id': messageJson['ping_event']['event_id']
+          });
+          _channel?.sink.add(pongMessage);
           break;
-
-        default:
-          debugPrint('🔌 Unknown message type: ${jsonData['type']}');
       }
-
-      _messageController.add(jsonData);
     } catch (e) {
-      debugPrint(
-          '🔌 Error handling Conversational AI 2.0 WebSocket message: $e');
-      _handleError(e);
+      if (kDebugMode) print('🔌 Error handling message: $e');
     }
   }
 
-  void _setAgentSpeaking(bool speaking) {
-    if (_isAgentSpeaking != speaking) {
-      _isAgentSpeaking = speaking;
-      _feedbackController.add(speaking);
-
-      if (speaking) {
-        _conversationState = ConversationState.agentSpeaking;
-        _agentRecentlySpeaking = true;
-        _agentGracePeriodTimer?.cancel(); // Cancel any existing timer
-        debugPrint('🔊 Agent started speaking - pausing recording');
-      } else {
-        _conversationState = ConversationState.idle;
-        debugPrint('🔊 Agent finished speaking - starting grace period');
-
-        // Start grace period timer to prevent immediate voice detection
-        _agentGracePeriodTimer?.cancel();
-        _agentGracePeriodTimer = Timer(Duration(milliseconds: 2000), () {
-          _agentRecentlySpeaking = false;
-          debugPrint(
-              '🔊 Agent grace period ended - normal voice detection resumed');
-        });
-      }
-
-      _conversationStateController.add(_conversationState);
+  void _handleAudioData(String? base64Audio) {
+    if (base64Audio == null || base64Audio.isEmpty) return;
+    
+    try {
+      // Queue audio data with the audio service
+      _audioService.queueAudioChunk(base64Audio);
+    } catch (e) {
+      if (kDebugMode) print('🔌 Error processing audio data: $e');
     }
   }
 
-  void _setUserSpeaking(bool speaking) {
-    if (_isUserSpeaking != speaking) {
-      _isUserSpeaking = speaking;
-      _userSpeakingController.add(speaking);
-
-      if (speaking) {
-        _conversationState = ConversationState.userSpeaking;
-        debugPrint('🎙️ User started speaking');
-
-        // If agent is speaking, interrupt it
-        if (_isAgentSpeaking) {
-          debugPrint(
-              '🎙️ User interrupted agent - sending interruption signal');
-          _sendInterruption();
-          // Stop audio playback immediately
-          GlobalAudioManager().stopAudio();
-          // Immediately reset agent speaking state to allow user audio through
-          _isAgentSpeaking = false;
-          _feedbackController.add(false);
-          debugPrint(
-              '🎙️ Agent speaking state immediately reset for interruption');
-        }
-      } else {
-        _conversationState = ConversationState.idle;
-        debugPrint('🎙️ User stopped speaking');
-
-        // Reset interrupted state when user finishes speaking to allow new agent responses
-        GlobalAudioManager().resetInterruptedState();
-
-        // Send end of turn signal after user stops speaking
-        _speechActivityTimer?.cancel();
-        _speechActivityTimer = Timer(Duration(milliseconds: 500), () {
-          if (!_isUserSpeaking) {
-            sendEndOfTurn();
-          }
-        });
-      }
-
-      _conversationStateController.add(_conversationState);
-    }
-  }
-
-  // Voice activity detection based on audio amplitude
-  void _detectVoiceActivity(Uint8List audioData) {
-    if (audioData.isEmpty) return;
-
-    // Skip voice activity detection if agent is speaking to prevent feedback loops
-    if (_isAgentSpeaking) {
-      debugPrint('🔌 Skipping voice activity detection - agent is speaking');
+  void sendMessage(String text) {
+    if (_channel?.closeCode != null) {
+      if (kDebugMode) print("Not connected.");
       return;
     }
+    
+    final message = jsonEncode({'text': text});
+    _channel!.sink.add(message);
+    _addUserMessage(text);
+  }
 
-    // Calculate RMS (Root Mean Square) for amplitude detection
+  void sendAudioChunk(Uint8List audioData) {
+    if (_channel?.closeCode != null) return;
+    
+    // Voice activity detection
+    _detectVoiceActivity(audioData);
+    
+    // Skip if bot is speaking to avoid feedback
+    if (_isBotSpeaking) return;
+    
+    try {
+      final base64Audio = base64Encode(audioData);
+      final audioMessage = jsonEncode({'user_audio_chunk': base64Audio});
+      _channel!.sink.add(audioMessage);
+    } catch (e) {
+      if (kDebugMode) print('🔌 Error sending audio chunk: $e');
+    }
+  }
+
+  void _detectVoiceActivity(Uint8List audioData) {
+    if (audioData.isEmpty || _isBotSpeaking) return;
+
+    // Calculate RMS for amplitude detection
     double sum = 0.0;
     for (int i = 0; i < audioData.length; i += 2) {
       if (i + 1 < audioData.length) {
-        // Combine two bytes to form a 16-bit sample
         int sample = (audioData[i + 1] << 8) | audioData[i];
-        if (sample > 32767) sample -= 65536; // Convert to signed
+        if (sample > 32767) sample -= 65536;
         sum += sample * sample;
       }
     }
 
     double rms = math.sqrt(sum / (audioData.length / 2));
-    double normalizedRms = rms / 32768.0; // Normalize to 0-1 range
+    double normalizedRms = rms / 32768.0;
 
-    // Use higher threshold if we recently had agent speaking to account for echo/feedback
-    double currentThreshold = _audioThreshold;
-    if (_agentRecentlySpeaking) {
-      currentThreshold =
-          _audioThreshold * 3.0; // 3x higher threshold after agent speaks
-      debugPrint(
-          '🔌 Using elevated threshold due to recent agent speech: $currentThreshold');
-    }
+    double currentThreshold = _agentRecentlySpeaking ? _audioThreshold * 3.0 : _audioThreshold;
 
-    // Voice activity detection logic
     if (normalizedRms > currentThreshold) {
       _consecutiveActiveChunks++;
       _consecutiveSilentChunks = 0;
 
-      // Start speaking detection - require more consecutive chunks after agent speech
-      int requiredChunks =
-          _agentRecentlySpeaking ? _speechThreshold * 2 : _speechThreshold;
+      int requiredChunks = _agentRecentlySpeaking ? _speechThreshold * 2 : _speechThreshold;
       if (!_isUserSpeaking && _consecutiveActiveChunks >= requiredChunks) {
-        _setUserSpeaking(true);
+        _updateUserSpeaking(true);
       }
     } else {
       _consecutiveSilentChunks++;
       _consecutiveActiveChunks = 0;
 
-      // Stop speaking detection
       if (_isUserSpeaking && _consecutiveSilentChunks >= _silenceThreshold) {
-        _setUserSpeaking(false);
+        _updateUserSpeaking(false);
       }
     }
   }
 
-  Future<void> sendAudioChunk(Uint8List audioData) async {
-    // Voice activity detection
-    _detectVoiceActivity(audioData);
-
-    // Prevent sending audio while agent is speaking to avoid feedback
-    if (_isAgentSpeaking || _isRecordingPaused) {
-      debugPrint(
-          '🔌 Skipping audio chunk - agent is speaking or recording paused');
-      return;
+  void interruptAgent() {
+    if (_isBotSpeaking) {
+      if (kDebugMode) print('🔌 Manual agent interruption');
+      final interruptMessage = jsonEncode({'type': 'user_interrupt'});
+      _channel?.sink.add(interruptMessage);
+      _updateBotSpeaking(false);
+      _audioService.stop();
     }
+  }
 
-    if (_channel?.closeCode != null) {
-      debugPrint(
-          '🔌 WebSocket is closed, attempting to reconnect before sending audio');
-      await _connect();
-      if (_channel?.closeCode != null) {
-        debugPrint('🔌 Failed to reconnect WebSocket, cannot send audio');
-        return;
+  void sendEndOfTurn() {
+    if (_channel?.closeCode != null) return;
+    
+    final endTurnMessage = jsonEncode({'type': 'end_of_turn'});
+    _channel?.sink.add(endTurnMessage);
+  }
+
+  // Private state update methods
+  void _updateConnectionStatus(ConnectionStatus status) {
+    if (_connectionStatus != status) {
+      _connectionStatus = status;
+      _connectionStatusController.add(status);
+    }
+  }
+
+  void _updateConversationState(ConversationState state) {
+    if (_conversationState != state) {
+      _conversationState = state;
+      _conversationStateController.add(state);
+    }
+  }
+
+  void _updateBotSpeaking(bool speaking) {
+    if (_isBotSpeaking != speaking) {
+      _isBotSpeaking = speaking;
+      _isBotSpeakingController.add(speaking);
+      
+      if (speaking) {
+        _updateConversationState(ConversationState.agentSpeaking);
+        _agentRecentlySpeaking = true;
+        _agentGracePeriodTimer?.cancel();
+      } else {
+        _updateConversationState(ConversationState.idle);
+        _agentGracePeriodTimer?.cancel();
+        _agentGracePeriodTimer = Timer(Duration(milliseconds: 2000), () {
+          _agentRecentlySpeaking = false;
+        });
       }
     }
+  }
 
-    try {
-      final base64Audio = base64Encode(audioData);
-      debugPrint(
-          '🔌 Sending audio chunk to Conversational AI 2.0: ${audioData.length} bytes');
-
-      // Correct Conversational AI 2.0 audio format - user_audio_chunk as key, base64 data as value
-      final audioMessage = jsonEncode({
-        'user_audio_chunk': base64Audio,
-      });
-
-      _channel!.sink.add(audioMessage);
-      debugPrint('🔌 Audio chunk sent successfully to Conversational AI 2.0');
-    } catch (e) {
-      debugPrint('🔌 Error sending audio chunk to Conversational AI 2.0: $e');
-      _handleError(e);
+  void _updateUserSpeaking(bool speaking) {
+    if (_isUserSpeaking != speaking) {
+      _isUserSpeaking = speaking;
+      _isUserSpeakingController.add(speaking);
+      
+      if (speaking) {
+        _updateConversationState(ConversationState.userSpeaking);
+        if (_isBotSpeaking) {
+          interruptAgent();
+        }
+      } else {
+        _updateConversationState(ConversationState.idle);
+        _audioService.resetInterruptedState();
+        Timer(Duration(milliseconds: 500), () {
+          if (!_isUserSpeaking) {
+            sendEndOfTurn();
+          }
+        });
+      }
     }
   }
 
-  // Send interruption signal to stop agent
-  Future<void> _sendInterruption() async {
-    if (_channel?.closeCode != null) {
-      debugPrint('🔌 WebSocket is closed, cannot send interruption');
-      return;
-    }
-
-    try {
-      final interruptMessage = jsonEncode({
-        'type': 'user_interrupt',
-      });
-      _channel!.sink.add(interruptMessage);
-      debugPrint('🔌 Interruption signal sent');
-    } catch (e) {
-      debugPrint('🔌 Error sending interruption: $e');
-      _handleError(e);
-    }
+  void _addUserMessage(String text) {
+    final message = ChatMessage(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      isUser: true,
+      text: text,
+      timestamp: DateTime.now(),
+    );
+    _currentChatHistory.add(message);
+    _chatHistoryController.add(List.from(_currentChatHistory));
   }
 
-  // Manual interruption method (can be called by UI)
-  Future<void> interruptAgent() async {
-    if (_isAgentSpeaking) {
-      debugPrint('🔌 Manual agent interruption requested');
-      await _sendInterruption();
-      // Stop audio playback immediately
-      await GlobalAudioManager().stopAudio();
-      _setAgentSpeaking(false);
-    }
+  void _addAgentMessage(String text) {
+    final message = ChatMessage(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      isUser: false,
+      text: text,
+      timestamp: DateTime.now(),
+    );
+    _currentChatHistory.add(message);
+    _chatHistoryController.add(List.from(_currentChatHistory));
   }
 
-  // Manual turn control methods for client-side VAD
-  void pauseRecording() {
-    _isRecordingPaused = true;
-    debugPrint('🔌 Recording manually paused');
-  }
-
-  void resumeRecording() {
-    _isRecordingPaused = false;
-    debugPrint('🔌 Recording manually resumed');
-  }
-
-  // Notify agent speaking state change (called by audio manager)
-  void notifyAgentPlaybackStarted() {
-    _setAgentSpeaking(true);
-  }
-
-  void notifyAgentPlaybackEnded() {
-    _setAgentSpeaking(false);
-  }
-
-  // Send text message (Conversational AI 2.0 multimodal feature)
-  Future<void> sendTextMessage(String text) async {
-    if (_channel?.closeCode != null) {
-      debugPrint('🔌 WebSocket is closed, cannot send text message');
-      return;
-    }
-
-    try {
-      final textMessage = jsonEncode({'type': 'user_message', 'text': text});
-      _channel!.sink.add(textMessage);
-      debugPrint('🔌 Text message sent: $text');
-    } catch (e) {
-      debugPrint('🔌 Error sending text message: $e');
-      _handleError(e);
-    }
-  }
-
-  // Conversational AI 2.0 contextual updates for better conversation flow
-  Future<void> sendContextualUpdate(String text) async {
-    if (_channel?.closeCode != null) {
-      debugPrint('🔌 WebSocket is closed, cannot send contextual update');
-      return;
-    }
-
-    try {
-      final updateMessage =
-          jsonEncode({'type': 'contextual_update', 'text': text});
-      _channel!.sink.add(updateMessage);
-      debugPrint('🔌 Contextual update sent: $text');
-    } catch (e) {
-      debugPrint('🔌 Error sending contextual update: $e');
-      _handleError(e);
-    }
-  }
-
-  // Send user activity signal (Conversational AI 2.0 feature)
-  Future<void> sendUserActivity() async {
-    if (_channel?.closeCode != null) {
-      debugPrint('🔌 WebSocket is closed, cannot send user activity');
-      return;
-    }
-
-    try {
-      final activityMessage = jsonEncode({
-        'type': 'user_activity',
-      });
-      _channel!.sink.add(activityMessage);
-      debugPrint('🔌 User activity signal sent');
-    } catch (e) {
-      debugPrint('🔌 Error sending user activity: $e');
-      _handleError(e);
-    }
-  }
-
-  // Send end-of-turn signal for client-side VAD (Conversational AI 2.0 feature)
-  Future<void> sendEndOfTurn() async {
-    if (_channel?.closeCode != null) {
-      debugPrint('🔌 WebSocket is closed, cannot send end-of-turn signal');
-      return;
-    }
-
-    try {
-      // Signal that the user has finished speaking for client-side VAD
-      final endOfTurnMessage = jsonEncode({
-        'type': 'user_turn_ended',
-      });
-      _channel!.sink.add(endOfTurnMessage);
-      debugPrint('🔌 End-of-turn signal sent for client-side VAD');
-    } catch (e) {
-      debugPrint('🔌 Error sending end-of-turn signal: $e');
-      _handleError(e);
-    }
-  }
-
-  // Tool result response (Conversational AI 2.0 advanced feature)
-  Future<void> sendToolResult(String toolCallId, Map<String, dynamic> result,
-      {bool isError = false}) async {
-    if (_channel?.closeCode != null) {
-      debugPrint('🔌 WebSocket is closed, cannot send tool result');
-      return;
-    }
-
-    try {
-      final toolResultMessage = jsonEncode({
-        'type': 'client_tool_result',
-        'tool_call_id': toolCallId,
-        'result': result,
-        'is_error': isError
-      });
-      _channel!.sink.add(toolResultMessage);
-      debugPrint('🔌 Tool result sent for call ID: $toolCallId');
-    } catch (e) {
-      debugPrint('🔌 Error sending tool result: $e');
-      _handleError(e);
-    }
-  }
-
-  void _handleError(dynamic error) {
-    debugPrint('🔌 Conversational AI 2.0 WebSocket error: $error');
-    _stateController.add(WebSocketConnectionState.error);
-    _scheduleReconnect();
-    _messageController.addError(error);
+  void _addSystemMessage(String text) {
+    final message = ChatMessage(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      isUser: false,
+      text: text,
+      timestamp: DateTime.now(),
+      metadata: {'type': 'system'},
+    );
+    _currentChatHistory.add(message);
+    _chatHistoryController.add(List.from(_currentChatHistory));
   }
 
   void _handleDisconnect() {
-    debugPrint('🔌 Conversational AI 2.0 WebSocket disconnected');
-    _stateController.add(WebSocketConnectionState.disconnected);
+    _audioService.stop();
     _scheduleReconnect();
   }
 
   void _scheduleReconnect() {
-    if (_reconnectAttempts >= 5) {
-      debugPrint('🔌 Maximum reconnect attempts reached, giving up');
-      return;
+    if (_reconnectAttempts < 5) {
+      _reconnectAttempts++;
+      final delay = Duration(seconds: math.pow(2, _reconnectAttempts).toInt());
+      
+      _reconnectTimer?.cancel();
+      _reconnectTimer = Timer(delay, () {
+        if (kDebugMode) print('🔌 Attempting to reconnect...');
+        connect();
+      });
     }
-
-    debugPrint('🔌 Scheduling reconnect attempt ${_reconnectAttempts + 1}/5');
-    _reconnectTimer?.cancel();
-    final delay = Duration(seconds: math.pow(2, _reconnectAttempts).toInt());
-    debugPrint('🔌 Will attempt to reconnect in ${delay.inSeconds} seconds');
-    _reconnectTimer = Timer(delay, () => _connect());
-    _reconnectAttempts++;
   }
 
-  Future<void> close() async {
-    debugPrint('🔌 Closing Conversational AI 2.0 WebSocket connection');
-    _speechActivityTimer?.cancel();
-    _agentGracePeriodTimer?.cancel();
-    await _channel?.sink.close(1000, 'Normal closure');
-    await _messageController.close();
-    await _audioController.close();
-    await _stateController.close();
-    await _feedbackController.close();
-    await _userSpeakingController.close();
-    await _conversationStateController.close();
+  void disconnect() {
     _reconnectTimer?.cancel();
-    _conversationId = null;
+    _channel?.sink.close();
+    _audioService.stop();
+    _updateConnectionStatus(ConnectionStatus.disconnected);
+  }
+
+  void dispose() {
+    disconnect();
+    _chatHistoryController.close();
+    _connectionStatusController.close();
+    _conversationStateController.close();
+    _isBotSpeakingController.close();
+    _isUserSpeakingController.close();
+    _vadScoreController.close();
+    _audioService.dispose();
+    _agentGracePeriodTimer?.cancel();
   }
 }
+
+// Re-export the original enums for backward compatibility
+export 'websocket_manager.dart' show WebSocketConnectionState, ConversationState;
+
+// Legacy compatibility - these can be removed once all references are updated
+typedef WebSocketConnectionState = ConnectionStatus;
