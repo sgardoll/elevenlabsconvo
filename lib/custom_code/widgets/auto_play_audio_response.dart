@@ -37,7 +37,7 @@ class GlobalAudioManager {
   // Buffer management
   static const int _maxBufferChunks =
       10; // Start playback after this many chunks
-  static const int _playbackDelayMs = 1500; // Delay before starting playback
+  static const int _playbackDelayMs = 500; // Delay before starting playback
   bool _isResponseComplete = false; // Track if agent response is complete
   bool _playbackBlocked = false; // Block all playback until reset
   bool _processingInterruption =

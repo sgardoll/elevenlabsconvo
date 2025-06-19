@@ -165,20 +165,63 @@ class _RoundRecordingButtonState extends State<RoundRecordingButton>
   }
 
   void _showSnackBar(String message) {
-    if (!widget.showSnackbar) return;
+    debugPrint('📱 _showSnackBar called with: $message');
+    debugPrint('📱 showSnackbar widget property: ${widget.showSnackbar}');
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          message,
-          style: TextStyle(
-            color: FlutterFlowTheme.of(context).primaryText,
+    if (!widget.showSnackbar) {
+      debugPrint('📱 Snackbar disabled by widget property');
+      return;
+    }
+
+    try {
+      // Try to find the nearest ScaffoldMessenger
+      final scaffoldMessenger = ScaffoldMessenger.of(context);
+      debugPrint('📱 Found ScaffoldMessenger: ${scaffoldMessenger != null}');
+
+      scaffoldMessenger.clearSnackBars(); // Clear any existing snackbars
+      scaffoldMessenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            message,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+            ),
+          ),
+          duration: Duration(milliseconds: 3000), // Longer duration
+          backgroundColor: Colors.blue.shade700,
+          behavior: SnackBarBehavior.floating,
+          margin: EdgeInsets.all(16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
           ),
         ),
-        duration: Duration(milliseconds: 2000),
-        backgroundColor: FlutterFlowTheme.of(context).secondary,
-      ),
-    );
+      );
+      debugPrint('📱 Snackbar shown successfully');
+    } catch (e) {
+      debugPrint('❌ Error showing snackbar: $e');
+      // Fallback to print if snackbar fails
+      debugPrint('📱 Snackbar message: $message');
+
+      // Alternative: Try to show a simple dialog as fallback
+      try {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text('Status'),
+            content: Text(message),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: Text('OK'),
+              ),
+            ],
+          ),
+        );
+      } catch (dialogError) {
+        debugPrint('❌ Error showing dialog fallback: $dialogError');
+      }
+    }
   }
 
   void _showPermissionDialog() {
@@ -215,6 +258,7 @@ class _RoundRecordingButtonState extends State<RoundRecordingButton>
     print('💬 Conversation state: $_conversationState');
 
     if (appState.wsConnectionState == 'disconnected') {
+      debugPrint('💬 WebSocket disconnected, showing snackbar');
       _showSnackBar('Disconnected');
       return;
     }
@@ -222,6 +266,7 @@ class _RoundRecordingButtonState extends State<RoundRecordingButton>
     // Handle different conversation states
     if (_isAgentSpeaking) {
       // If agent is speaking, interrupt it
+      debugPrint('💬 Agent speaking, showing interruption snackbar');
       _showSnackBar('Interrupting agent...');
       final wsManager = WebSocketManager();
       await wsManager.interruptAgent();
@@ -237,6 +282,7 @@ class _RoundRecordingButtonState extends State<RoundRecordingButton>
         );
         print('💬 Stop recording result: $result');
         if (result.startsWith('error')) {
+          debugPrint('💬 Stop recording error, showing snackbar');
           _showSnackBar('Error stopping recording: ${result.substring(7)}');
         }
 
@@ -246,6 +292,7 @@ class _RoundRecordingButtonState extends State<RoundRecordingButton>
         });
       } catch (e) {
         print('❌ Error stopping recording: $e');
+        debugPrint('💬 Stop recording exception, showing snackbar');
         _showSnackBar('Error: $e');
       }
     } else {
@@ -269,6 +316,7 @@ class _RoundRecordingButtonState extends State<RoundRecordingButton>
         if (requestStatus.isGranted) {
           _startRecording();
         } else {
+          debugPrint('💬 Microphone permission denied, showing snackbar');
           _showSnackBar('Need Microphone Permissions');
         }
       }
@@ -284,6 +332,7 @@ class _RoundRecordingButtonState extends State<RoundRecordingButton>
       print('💬 Start recording result: $result');
 
       if (result.startsWith('error')) {
+        debugPrint('💬 Start recording error, showing snackbar');
         _showSnackBar('Error starting recording: ${result.substring(7)}');
         return;
       }
@@ -294,6 +343,7 @@ class _RoundRecordingButtonState extends State<RoundRecordingButton>
       });
     } catch (e) {
       print('❌ Error starting recording: $e');
+      debugPrint('💬 Start recording exception, showing snackbar');
       _showSnackBar('Error: $e');
     }
   }
@@ -370,33 +420,32 @@ class _RoundRecordingButtonState extends State<RoundRecordingButton>
               child: child,
             );
           },
-          child: Container(
-            width: widget.size,
-            height: widget.size,
-            decoration: widget.borderWeight > 0 && widget.borderColor != null
-                ? BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: widget.borderColor!,
-                      width: widget.borderWeight,
-                    ),
-                  )
-                : null,
-            child: Material(
-              color: buttonColor,
-              elevation: buttonElevation,
-              shape: CircleBorder(),
-              clipBehavior: Clip.antiAlias,
+          child: Material(
+            color: Colors.transparent,
+            elevation: buttonElevation,
+            shape: CircleBorder(),
+            clipBehavior: Clip.antiAlias,
+            child: Container(
+              width: widget.size,
+              height: widget.size,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: buttonColor,
+                border: widget.borderWeight > 0 && widget.borderColor != null
+                    ? Border.all(
+                        color: widget.borderColor!,
+                        width: widget.borderWeight,
+                      )
+                    : null,
+              ),
               child: InkWell(
                 onTap: _handleRecording,
                 splashColor:
-                    widget.rippleColor ?? Colors.white.withOpacity(0.3),
-                highlightColor: widget.rippleColor?.withOpacity(0.1) ??
-                    Colors.white.withOpacity(0.1),
-                customBorder: CircleBorder(),
-                child: Container(
-                  width: widget.size,
-                  height: widget.size,
+                    widget.rippleColor ?? Colors.white.withOpacity(0.4),
+                highlightColor: widget.rippleColor?.withOpacity(0.2) ??
+                    Colors.white.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(widget.size / 2),
+                child: Center(
                   child: Icon(
                     buttonIcon,
                     color: iconColor,

@@ -46,7 +46,7 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
                 ),
               ),
             )
-          : HomePageWidget(),
+          : DemoWidget(),
       routes: [
         FFRoute(
           name: '_initialize',
@@ -64,12 +64,12 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
                     ),
                   ),
                 )
-              : HomePageWidget(),
+              : DemoWidget(),
         ),
         FFRoute(
-          name: HomePageWidget.routeName,
-          path: HomePageWidget.routePath,
-          builder: (context, params) => HomePageWidget(),
+          name: DemoWidget.routeName,
+          path: DemoWidget.routePath,
+          builder: (context, params) => DemoWidget(),
         )
       ].map((r) => r.toRoute(appStateNotifier)).toList(),
     );
