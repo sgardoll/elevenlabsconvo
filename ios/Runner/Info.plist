@@ -55,11 +55,7 @@
     <!-- End of NSLocalNetworkUsageDescription -->
     <!-- Start of NSAppTransportSecurity -->
     <key>NSAppTransportSecurity</key>
-    <dict>
-      <key>NSAllowsArbitraryLoads</key>
-      <true/>
-    </dict>
-    <key>NSMicrophoneUsageDescription</key>
+    <dict></dict>
     <!-- End of NSAppTransportSecurity -->
     <key>UILaunchStoryboardName</key>
     <string>LaunchScreen</string>

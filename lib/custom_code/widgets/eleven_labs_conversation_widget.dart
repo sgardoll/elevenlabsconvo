@@ -6,11 +6,13 @@ import 'package:flutter/material.dart';
 // Begin custom widget code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
-import 'index.dart'; // Imports other custom widgets
-
 import 'package:flutter/services.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:record/record.dart';
+import 'package:just_audio/just_audio.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:web_socket_channel/status.dart' as status;
 import 'dart:async';
-import 'index.dart'; // Your other custom widgets
 import '../conversation_state_manager.dart';
 import '../websocket_service.dart';
 import '../recording_service.dart';
@@ -340,17 +342,17 @@ class _ElevenLabsConversationWidgetState
             ),
           ],
 
-          // Optional debug info in debug mode
-          if (kDebugMode) ...[
-            SizedBox(height: 8),
-            Text(
-              'VAD: ${_currentVadScore.toStringAsFixed(2)} | Connected: $_isConnected',
-              style: TextStyle(
-                fontSize: 10,
-                color: Colors.grey,
-              ),
-            ),
-          ],
+          // // Optional debug info in debug mode
+          // if (kDebugMode) ...[
+          //   SizedBox(height: 8),
+          //   Text(
+          //     'VAD: ${_currentVadScore.toStringAsFixed(2)} | Connected: $_isConnected',
+          //     style: TextStyle(
+          //       fontSize: 10,
+          //       color: Colors.grey,
+          //     ),
+          //   ),
+          // ],
         ],
       ),
     );

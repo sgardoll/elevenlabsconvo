@@ -96,7 +96,7 @@ class _DemoWidgetState extends State<DemoWidget> {
                 showStatusText: true,
                 enableHapticFeedback: true,
                 indicatorSize: 80.0,
-                indicatorElevation: 2.0,
+                indicatorElevation: 4.0,
                 onStateChanged: (state) async {
                   FFAppState().conversationState = state;
                   safeSetState(() {});
