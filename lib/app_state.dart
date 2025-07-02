@@ -38,10 +38,45 @@ class FFAppState extends ChangeNotifier {
 
   late FlutterSecureStorage secureStorage;
 
-  bool _isRecording = false;
-  bool get isRecording => _isRecording;
-  set isRecording(bool value) {
-    _isRecording = value;
+  List<dynamic> _conversationMessages = [];
+  List<dynamic> get conversationMessages => _conversationMessages;
+  set conversationMessages(List<dynamic> value) {
+    _conversationMessages = value;
+  }
+
+  void addToConversationMessages(dynamic value) {
+    conversationMessages.add(value);
+  }
+
+  void removeFromConversationMessages(dynamic value) {
+    conversationMessages.remove(value);
+  }
+
+  void removeAtIndexFromConversationMessages(int index) {
+    conversationMessages.removeAt(index);
+  }
+
+  void updateConversationMessagesAtIndex(
+    int index,
+    dynamic Function(dynamic) updateFn,
+  ) {
+    conversationMessages[index] = updateFn(_conversationMessages[index]);
+  }
+
+  void insertAtIndexInConversationMessages(int index, dynamic value) {
+    conversationMessages.insert(index, value);
+  }
+
+  String _lastAudioResponse = '';
+  String get lastAudioResponse => _lastAudioResponse;
+  set lastAudioResponse(String value) {
+    _lastAudioResponse = value;
+  }
+
+  String _wsConnectionState = 'disconnected';
+  String get wsConnectionState => _wsConnectionState;
+  set wsConnectionState(String value) {
+    _wsConnectionState = value;
   }
 
   String _elevenLabsApiKey = '';
@@ -66,22 +101,10 @@ class FFAppState extends ChangeNotifier {
     secureStorage.delete(key: 'ff_elevenLabsAgentId');
   }
 
-  String _conversationState = 'disconnected';
-  String get conversationState => _conversationState;
-  set conversationState(String value) {
-    _conversationState = value;
-  }
-
-  String _lastTranscript = '';
-  String get lastTranscript => _lastTranscript;
-  set lastTranscript(String value) {
-    _lastTranscript = value;
-  }
-
-  String _lastError = '';
-  String get lastError => _lastError;
-  set lastError(String value) {
-    _lastError = value;
+  bool _isRecording = false;
+  bool get isRecording => _isRecording;
+  set isRecording(bool value) {
+    _isRecording = value;
   }
 }
 
