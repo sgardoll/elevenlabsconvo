@@ -1,1 +1,1 @@
-export 'eleven_labs_conversation_widget.dart' show ElevenLabsConversationWidget;
+export 'simple_recording_button.dart' show SimpleRecordingButton;

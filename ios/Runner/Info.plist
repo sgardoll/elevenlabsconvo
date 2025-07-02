@@ -5,7 +5,7 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>$(DEVELOPMENT_LANGUAGE)</string>
     <key>CFBundleDisplayName</key>
-    <string>Elevenlabs Conversational AI 2</string>
+    <string>Elevenlabs Conversational AI v2</string>
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
@@ -13,7 +13,7 @@
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>Elevenlabs Conversational AI 2</string>
+    <string>Elevenlabs Conversational AI v2</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -26,10 +26,10 @@
         <key>CFBundleTypeRole</key>
         <string>Editor</string>
         <key>CFBundleURLName</key>
-        <string>elevenlabsconversationalai2.com</string>
+        <string>elevenlabsconversationalaiv2.com</string>
         <key>CFBundleURLSchemes</key>
         <array>
-          <string>elevenlabsconversationalai2</string>
+          <string>elevenlabsconversationalaiv2</string>
         </array>
       </dict>
     </array>
@@ -42,21 +42,17 @@
     <key>NSBluetoothAlwaysUsageDescription</key>
     <string>This app requires permission to Bluetooth to communicate with AI</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>This app requires microphone access for voice conversations with AI</string>
+    <string>This app requires permission to Microphone to communicate with AI</string>
     <!-- Start of UIBackgroundModes -->
     <key>UIBackgroundModes</key>
     <array>
       <string>audio</string>
     </array>
     <!-- End of UIBackgroundModes -->
-    <!-- Start of NSLocalNetworkUsageDescription -->
+    <!-- Start of LocalNetwork -->
     <key>NSLocalNetworkUsageDescription</key>
-    <string>This app uses the local network to connect to Flutter's debugging tools.</string>
-    <!-- End of NSLocalNetworkUsageDescription -->
-    <!-- Start of NSAppTransportSecurity -->
-    <key>NSAppTransportSecurity</key>
-    <dict></dict>
-    <!-- End of NSAppTransportSecurity -->
+    <string>This app uses your local network for communication with AI services</string>
+    <!-- End of LocalNetwork -->
     <key>UILaunchStoryboardName</key>
     <string>LaunchScreen</string>
     <key>UIMainStoryboardFile</key>

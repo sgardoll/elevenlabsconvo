@@ -1,4 +1,5 @@
 
+
 class FFLibraryValues {
   static FFLibraryValues _instance = FFLibraryValues._internal();
 
@@ -13,5 +14,5 @@ class FFLibraryValues {
   }
 
   late String elevenlabsApiKey = '';
-  late String elevenLabsAgentId = '';
+  late String elevenlabsAgentId = '';
 }
