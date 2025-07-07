@@ -1,7 +1,6 @@
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/backend/schema/structs/index.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -116,13 +115,14 @@ class _TranscriptionBubblesWidgetState
                                 decoration: BoxDecoration(
                                   color: FlutterFlowTheme.of(context).primary,
                                   image: DecorationImage(
-                                    fit: BoxFit.cover,
-                                    image: CachedNetworkImageProvider(
+                                    fit: BoxFit.contain,
+                                    alignment: AlignmentDirectional(0.0, 0.0),
+                                    image: Image.network(
                                       valueOrDefault<String>(
                                         widget.agentImage,
                                         'https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/elevenlabs-conversational2-x2dkep/assets/87a4tp9woym0/11.png',
                                       ),
-                                    ),
+                                    ).image,
                                   ),
                                   borderRadius: BorderRadius.circular(16.0),
                                 ),
