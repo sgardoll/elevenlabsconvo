@@ -50,7 +50,12 @@ class ConversationalAIService {
   // Core components
   WebSocketChannel? _channel;
   final AudioRecorder _recorder = AudioRecorder();
-  AudioPlayer? _player;
+
+  // --- REFACTORED AUDIO COMPONENTS ---
+  final AudioPlayer _player = AudioPlayer();
+  late ConcatenatingAudioSource _playlist;
+  int _tempFileCounter = 0;
+  // --- END REFACTORED AUDIO COMPONENTS ---
 
   // Configuration
   String _apiKey = '';
@@ -67,14 +72,6 @@ class ConversationalAIService {
 
   // Audio feedback prevention
   bool _recordingPaused = false;
-
-  // Timer to reset speaking state
-  Timer? _speakingResetTimer;
-
-  // Audio queue management
-  final List<String> _audioQueue = [];
-  bool _isPlayingQueue = false;
-  int _audioChunkCounter = 0;
 
   // Reactive streams for UI
   final _conversationController =
@@ -110,6 +107,15 @@ class ConversationalAIService {
     debugPrint('🔌 Initializing Conversational AI Service v2.0');
     _apiKey = apiKey;
     _agentId = agentId;
+
+    // --- NEW: Initialize playlist and player state listener ---
+    _playlist = ConcatenatingAudioSource(children: []);
+    _player.playerStateStream.listen((state) {
+      if (state.processingState == ProcessingState.completed) {
+        _resetAgentSpeakingState();
+      }
+    });
+    // --- END NEW ---
 
     try {
       await _connect();
@@ -410,127 +416,74 @@ class ConversationalAIService {
   }
 
   // =============================================================================
-  // 4. AUDIO PLAYBACK
+  // 4. REFACTORED AUDIO PLAYBACK
   // =============================================================================
 
   Future<void> _playAudio(String base64Audio) async {
-    // Add to queue instead of playing immediately
-    _audioQueue.add(base64Audio);
-    debugPrint(
-        '🔊 Added audio chunk to queue. Queue length: ${_audioQueue.length}');
-
-    // Set agent speaking state on first chunk
-    if (!_isAgentSpeaking) {
-      _isAgentSpeaking = true;
-      _recordingPaused = true;
-      _stateController.add(ConversationState.playing);
-    }
-
-    // Start processing queue if not already processing
-    if (!_isPlayingQueue) {
-      _processAudioQueue();
-    }
-  }
-
-  Future<void> _processAudioQueue() async {
-    if (_isPlayingQueue || _audioQueue.isEmpty) {
-      return;
-    }
-
-    _isPlayingQueue = true;
-    debugPrint('🔊 Starting audio queue processing');
-
-    while (_audioQueue.isNotEmpty) {
-      final base64Audio = _audioQueue.removeAt(0);
-      await _playAudioChunk(base64Audio);
-    }
-
-    _isPlayingQueue = false;
-    debugPrint('🔊 Audio queue processing completed');
-
-    // Reset speaking state after queue is done
-    _resetAgentSpeakingState();
-  }
-
-  Future<void> _playAudioChunk(String base64Audio) async {
-    final chunkId = ++_audioChunkCounter;
-
     try {
+      if (!_isAgentSpeaking) {
+        _isAgentSpeaking = true;
+        _recordingPaused = true;
+        _stateController.add(ConversationState.playing);
+        // Clear old playlist and set the source for the player
+        await _playlist.clear();
+        await _player.setAudioSource(_playlist);
+        debugPrint('🔊 Started new audio session');
+      }
+
       final audioBytes = base64Decode(base64Audio);
       if (audioBytes.length < 10) {
-        debugPrint('🔊 Chunk $chunkId: Audio data too small, skipping');
+        debugPrint('🔊 Audio chunk too small, skipping');
         return;
       }
 
-      debugPrint(
-          '🔊 Chunk $chunkId: Playing audio: ${audioBytes.length} bytes');
-
-      // Create WAV file from PCM data
       final wavBytes = _createWavFile(audioBytes);
       final tempFile = await _createTempFile(wavBytes);
 
-      // Create a new player for this audio chunk
-      final player = AudioPlayer();
+      // Add the new audio file to the playlist
+      await _playlist.add(AudioSource.uri(Uri.file(tempFile.path)));
+      debugPrint(
+          '🔊 Added audio chunk to playlist. Total chunks: ${_playlist.length}');
 
-      try {
-        // Set audio source
-        await player.setAudioSource(AudioSource.uri(Uri.file(tempFile.path)));
-        debugPrint('🔊 Chunk $chunkId: Audio source set: ${tempFile.path}');
-
-        final duration = player.duration;
-        debugPrint('🔊 Chunk $chunkId: Audio duration: $duration');
-
-        // Set volume and play
-        await player.setVolume(1.0);
-        await player.play();
-        debugPrint('🔊 Chunk $chunkId: Audio play() started');
-
-        // Wait for playback to complete
-        bool completed = false;
-
-        final stateSubscription = player.playerStateStream.listen((state) {
-          debugPrint(
-              '🔊 Chunk $chunkId: State ${state.processingState}, playing: ${state.playing}');
-
-          if (state.processingState == ProcessingState.completed) {
-            completed = true;
-          }
-        });
-
-        // Wait for completion with timeout
-        final startTime = DateTime.now();
-        while (
-            !completed && DateTime.now().difference(startTime).inSeconds < 15) {
-          await Future.delayed(Duration(milliseconds: 100));
-        }
-
-        if (!completed) {
-          debugPrint('⚠️ Chunk $chunkId: Audio playback timeout');
-        } else {
-          debugPrint('🔊 Chunk $chunkId: Audio playback completed');
-        }
-
-        await stateSubscription.cancel();
-      } finally {
-        // Always dispose the player and cleanup
-        await player.dispose();
-        try {
-          await tempFile.delete();
-        } catch (e) {
-          debugPrint('⚠️ Chunk $chunkId: Could not delete temp file: $e');
-        }
+      // Start playing if we aren't already
+      if (!_player.playing) {
+        await _player.play();
+        debugPrint('🔊 Started playlist playback');
       }
     } catch (e) {
-      debugPrint('❌ Chunk $chunkId: Error playing audio: $e');
+      debugPrint('❌ Error playing audio: $e');
     }
   }
 
-  void _resetAgentSpeakingState() {
+  void _resetAgentSpeakingState() async {
     debugPrint('🔊 Resetting agent speaking state');
     _isAgentSpeaking = false;
     _recordingPaused = false;
     _stateController.add(
         _isConnected ? ConversationState.connected : ConversationState.idle);
+
+    // Clean up temporary files from the completed playlist
+    try {
+      final dir = await getTemporaryDirectory();
+      final directory = Directory(dir.path);
+      if (await directory.exists()) {
+        final files = directory.listSync();
+        for (var file in files) {
+          if (file.path.contains('temp_audio_') && file.path.endsWith('.wav')) {
+            try {
+              file.deleteSync();
+              debugPrint('🗑️ Deleted temp file: ${file.path}');
+            } catch (e) {
+              debugPrint('⚠️ Could not delete temp file: $e');
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error cleaning up temp files: $e');
+    }
+
+    _tempFileCounter = 0;
   }
 
   Uint8List _createWavFile(Uint8List pcmData) {
@@ -585,8 +538,7 @@ class ConversationalAIService {
 
   Future<File> _createTempFile(Uint8List data) async {
     final dir = await getTemporaryDirectory();
-    final file = File(
-        '${dir.path}/temp_audio_${DateTime.now().millisecondsSinceEpoch}.wav');
+    final file = File('${dir.path}/temp_audio_${_tempFileCounter++}.wav');
     await file.writeAsBytes(data);
     return file;
   }
@@ -690,16 +642,15 @@ class ConversationalAIService {
       await stopRecording();
     }
 
-    // Clear audio queue
-    _audioQueue.clear();
-    _isPlayingQueue = false;
+    // --- NEW: Stop and dispose the single player ---
+    await _player.stop();
+    await _player.dispose();
+    // --- END NEW ---
 
     await _channel?.sink.close();
     await _recorder.dispose();
-    await _player?.dispose();
     await _audioStreamSubscription?.cancel();
     _reconnectTimer?.cancel();
-    _speakingResetTimer?.cancel();
 
     await _conversationController.close();
     await _stateController.close();
