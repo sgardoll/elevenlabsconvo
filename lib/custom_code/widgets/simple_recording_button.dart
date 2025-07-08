@@ -124,9 +124,11 @@ class _SimpleRecordingButtonState extends State<SimpleRecordingButton>
   Future<void> _handleTap() async {
     if (!mounted) return;
 
-    // Prevent interaction if agent is speaking
+    // Allow interruption if agent is speaking - tap to interrupt
     if (_currentState == ConversationState.playing) {
-      _showSnackBar('Please wait for the agent to finish speaking');
+      debugPrint('🔊 User tapped to interrupt agent speaking');
+      await _service.triggerInterruption();
+      _showSnackBar('Agent interrupted');
       return;
     }
 
@@ -167,7 +169,8 @@ class _SimpleRecordingButtonState extends State<SimpleRecordingButton>
       case ConversationState.recording:
         return widget.recordingColor ?? FlutterFlowTheme.of(context).error;
       case ConversationState.playing:
-        return FlutterFlowTheme.of(context).tertiary;
+        return FlutterFlowTheme.of(context)
+            .secondary; // Changed to secondary for better tap-to-interrupt visibility
       case ConversationState.connected:
         return widget.idleColor ?? FlutterFlowTheme.of(context).primary;
       case ConversationState.connecting:
@@ -184,7 +187,8 @@ class _SimpleRecordingButtonState extends State<SimpleRecordingButton>
       case ConversationState.recording:
         return Icons.stop;
       case ConversationState.playing:
-        return Icons.volume_up;
+        return Icons
+            .pause; // Changed from volume_up to pause to indicate tap-to-interrupt
       case ConversationState.connecting:
         return Icons.sync;
       case ConversationState.error:
