@@ -67,6 +67,7 @@ class ConversationalAIService {
   bool _isRecording = false;
   bool _isAgentSpeaking = false;
   bool _isConnected = false;
+  bool _isDisposing = false; // Add flag to track intentional disposal
   int _reconnectAttempts = 0;
   Timer? _reconnectTimer;
   StreamSubscription<Uint8List>? _audioStreamSubscription;
@@ -196,6 +197,7 @@ class ConversationalAIService {
   bool get isRecording => _isRecording;
   bool get isAgentSpeaking => _isAgentSpeaking;
   bool get isConnected => _isConnected;
+  bool get isDisposing => _isDisposing;
   bool get isInterrupted => _isInterrupted;
   String get currentAudioSessionId => _currentAudioSessionId;
   ConversationState get currentState => _getCurrentState();
@@ -208,6 +210,7 @@ class ConversationalAIService {
     }
 
     debugPrint('🔌 Initializing Conversational AI Service v2.0');
+    _isDisposing = false; // Reset disposal flag on initialization
     _apiKey = apiKey;
     _agentId = agentId;
 
@@ -1491,7 +1494,10 @@ class ConversationalAIService {
       FFAppState().wsConnectionState =
           'error: ${error.toString().substring(0, math.min(50, error.toString().length))}';
     });
-    _scheduleReconnect();
+    // Only schedule reconnect if not being disposed
+    if (!_isDisposing) {
+      _scheduleReconnect();
+    }
   }
 
   void _handleDisconnect() {
@@ -1502,7 +1508,10 @@ class ConversationalAIService {
     FFAppState().update(() {
       FFAppState().wsConnectionState = 'disconnected';
     });
-    _scheduleReconnect();
+    // Only schedule reconnect if not being disposed
+    if (!_isDisposing) {
+      _scheduleReconnect();
+    }
   }
 
   void _scheduleReconnect() {
@@ -1510,14 +1519,24 @@ class ConversationalAIService {
       debugPrint('🔌 Maximum reconnect attempts reached');
       return;
     }
+    if (_isDisposing) {
+      debugPrint('🔌 Service is disposing, skipping reconnect');
+      return;
+    }
     _reconnectTimer?.cancel();
     final delay = Duration(seconds: math.pow(2, _reconnectAttempts).toInt());
-    _reconnectTimer = Timer(delay, () => _connect());
+    _reconnectTimer = Timer(delay, () {
+      // Double-check disposal state before reconnecting
+      if (!_isDisposing) {
+        _connect();
+      }
+    });
     _reconnectAttempts++;
   }
 
   Future<void> dispose() async {
     debugPrint('🔌 Disposing Conversational AI Service');
+    _isDisposing = true; // Set flag to prevent reconnection
     if (_isRecording) {
       await stopRecording();
     }
@@ -1586,6 +1605,8 @@ class ConversationalAIService {
 
     // Cancel timers
     _reconnectTimer?.cancel();
+    debugPrint(
+        '🔌 Reconnect timer cancelled, disposal flag set to prevent re-initialization');
 
     // Close streams
     await _conversationController.close();
