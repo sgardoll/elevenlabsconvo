@@ -213,7 +213,7 @@ class ConversationalAIService {
 
     _playlist = ConcatenatingAudioSource(children: []);
 
-    // Cancel previous subscriptions if they exist
+    // Cancel previous subscriptions if they exist to prevent race conditions
     await _playerStateSubscription?.cancel();
     await _currentIndexSubscription?.cancel();
 
@@ -227,9 +227,18 @@ class ConversationalAIService {
     // Listen for when the player moves to the next track to clean up the previous one
     _currentIndexSubscription = _player.currentIndexStream.listen((index) {
       if (index != null && index > 0) {
-        // We've moved to a new track, so the previous one (at index - 1) can be deleted
-        final fileToDelete = _tempFilePaths[index - 1];
-        _deleteTempFile(fileToDelete);
+        // Add bounds checking to prevent race condition crashes
+        final targetIndex = index - 1;
+        if (targetIndex >= 0 && targetIndex < _tempFilePaths.length) {
+          // We've moved to a new track, so the previous one can be deleted
+          final fileToDelete = _tempFilePaths[targetIndex];
+          _deleteTempFile(fileToDelete);
+          debugPrint(
+              '🗑️ Cleaned up previous audio file at index $targetIndex');
+        } else {
+          debugPrint(
+              '⚠️ Skipped file cleanup - index $targetIndex out of bounds (list size: ${_tempFilePaths.length})');
+        }
       }
     });
 
@@ -411,11 +420,8 @@ class ConversationalAIService {
       _stateController.add(
           _isConnected ? ConversationState.connected : ConversationState.idle);
 
-      // Clean up temp files
-      for (final path in _tempFilePaths) {
-        _deleteTempFile(path);
-      }
-      _tempFilePaths.clear();
+      // Clean up temp files safely
+      _safeClearTempFiles();
       _tempFileCounter = 0;
 
       // Invalidate current audio session
@@ -945,11 +951,21 @@ class ConversationalAIService {
   Future<void> _clearPlaylistAndFiles() async {
     await _player.stop();
     await _playlist.clear();
-    for (final path in _tempFilePaths) {
+    _safeClearTempFiles();
+    _tempFileCounter = 0;
+  }
+
+  /// Safely clears temporary files with race condition protection
+  void _safeClearTempFiles() {
+    // Create a copy of the paths to avoid concurrent modification
+    final pathsCopy = List<String>.from(_tempFilePaths);
+    _tempFilePaths.clear();
+
+    // Delete files from the copy to prevent interference with ongoing operations
+    for (final path in pathsCopy) {
       _deleteTempFile(path);
     }
-    _tempFilePaths.clear();
-    _tempFileCounter = 0;
+    debugPrint('🗑️ Safely cleared ${pathsCopy.length} temporary audio files');
   }
 
   void _deleteTempFile(String path) {
@@ -1557,10 +1573,11 @@ class ConversationalAIService {
     _recordingResumeTimer?.cancel();
     _feedbackPreventionTimer?.cancel();
 
-    // Clean up audio components
-    await _player.dispose();
+    // Clean up audio components - cancel subscriptions BEFORE disposing player
+    // to prevent final stream events from triggering race conditions
     await _playerStateSubscription?.cancel();
     await _currentIndexSubscription?.cancel();
+    await _player.dispose();
 
     // Close connection
     await _channel?.sink.close();
@@ -1576,11 +1593,8 @@ class ConversationalAIService {
     await _recordingController.close();
     await _connectionController.close();
 
-    // Clean up temporary files
-    for (final path in _tempFilePaths) {
-      _deleteTempFile(path);
-    }
-    _tempFilePaths.clear();
+    // Clean up temporary files safely
+    _safeClearTempFiles();
 
     debugPrint('🔌 Conversational AI Service disposed with enhanced cleanup');
   }
