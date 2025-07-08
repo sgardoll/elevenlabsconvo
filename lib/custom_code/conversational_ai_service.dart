@@ -74,6 +74,13 @@ class ConversationalAIService {
   StreamSubscription? _playerStateSubscription;
   StreamSubscription? _currentIndexSubscription;
 
+  // Enhanced interruption state management
+  bool _isInterrupted = false;
+  DateTime? _lastInterruptionTime;
+  String _currentAudioSessionId = '';
+  static const int _audioChunkGracePeriodMs =
+      500; // Grace period for late chunks
+
   // Enhanced turn detection
   double _lastVadScore = 0.0;
   double _vadThreshold = 0.4;
@@ -98,6 +105,8 @@ class ConversationalAIService {
   bool get isRecording => _isRecording;
   bool get isAgentSpeaking => _isAgentSpeaking;
   bool get isConnected => _isConnected;
+  bool get isInterrupted => _isInterrupted;
+  String get currentAudioSessionId => _currentAudioSessionId;
   ConversationState get currentState => _getCurrentState();
 
   Future<String> initialize(
@@ -149,8 +158,24 @@ class ConversationalAIService {
 
   Future<void> _playAudio(String base64Audio) async {
     try {
+      // Check for interruption state - reject stale audio chunks
+      if (_isInterrupted && _lastInterruptionTime != null) {
+        final timeSinceInterruption =
+            DateTime.now().difference(_lastInterruptionTime!).inMilliseconds;
+        if (timeSinceInterruption < _audioChunkGracePeriodMs) {
+          debugPrint(
+              '🔊 Ignoring stale audio chunk (${timeSinceInterruption}ms since interruption)');
+          return;
+        }
+      }
+
       if (!_isAgentSpeaking) {
+        // Start new audio session
+        _currentAudioSessionId = _generateAudioSessionId();
         _isAgentSpeaking = true;
+        _isInterrupted = false; // Reset interruption flag for new session
+        _lastInterruptionTime = null;
+
         // Don't pause recording - allow continuous audio for turn detection
         _recordingPaused = false;
         _stateController.add(ConversationState.playing);
@@ -158,7 +183,7 @@ class ConversationalAIService {
         await _clearPlaylistAndFiles();
         await _player.setAudioSource(_playlist);
         debugPrint(
-            '🔊 Started new audio session (recording continues for turn detection)');
+            '🔊 Started new audio session ${_currentAudioSessionId} (recording continues for turn detection)');
       }
 
       final audioBytes = base64Decode(base64Audio);
@@ -170,7 +195,7 @@ class ConversationalAIService {
       _tempFilePaths.add(tempFile.path);
       await _playlist.add(AudioSource.uri(Uri.file(tempFile.path)));
       debugPrint(
-          '🔊 Added audio chunk to playlist. Total chunks: ${_playlist.length}');
+          '🔊 Added audio chunk to playlist. Session: ${_currentAudioSessionId}, Total chunks: ${_playlist.length}');
 
       if (!_player.playing) {
         _player.play();
@@ -182,17 +207,41 @@ class ConversationalAIService {
   }
 
   void _resetAgentSpeakingState() async {
-    debugPrint('🔊 Resetting agent speaking state');
+    debugPrint(
+        '🔊 Resetting agent speaking state (Session: $_currentAudioSessionId)');
     _isAgentSpeaking = false;
     _recordingPaused = false;
+
+    // Reset interruption state when audio naturally completes
+    _isInterrupted = false;
+    _lastInterruptionTime = null;
+    _currentAudioSessionId = '';
+
     _stateController.add(
         _isConnected ? ConversationState.connected : ConversationState.idle);
     await _clearPlaylistAndFiles();
   }
 
+  // Public method to manually trigger interruption (for user-initiated interruption)
+  Future<void> triggerInterruption() async {
+    debugPrint('🔊 Manual interruption triggered by user');
+    _handleUserInterruption();
+  }
+
+  // Generate unique audio session ID
+  String _generateAudioSessionId() {
+    return 'audio_session_${DateTime.now().millisecondsSinceEpoch}_${math.Random().nextInt(1000)}';
+  }
+
   // Handle user interruption by immediately stopping agent audio
-  void _handleUserInterruption() async {
-    debugPrint('🔊 User interrupted agent - stopping audio immediately');
+  Future<void> _handleUserInterruption() async {
+    debugPrint(
+        '🔊 User interrupted agent - stopping audio immediately (Session: $_currentAudioSessionId)');
+
+    // Set interruption state immediately
+    _isInterrupted = true;
+    _lastInterruptionTime = DateTime.now();
+
     if (_isAgentSpeaking) {
       // Stop audio playback immediately
       await _player.stop();
@@ -214,6 +263,11 @@ class ConversationalAIService {
       }
       _tempFilePaths.clear();
       _tempFileCounter = 0;
+
+      // Invalidate current audio session
+      _currentAudioSessionId = '';
+
+      debugPrint('🔊 Audio session interrupted and cleaned up');
     }
   }
 
@@ -224,13 +278,16 @@ class ConversationalAIService {
       _lastVadScore = vadScore.toDouble();
 
       // Monitor for user speech during agent speaking
-      if (_isAgentSpeaking && _lastVadScore > _vadThreshold) {
+      if (_isAgentSpeaking &&
+          !_isInterrupted &&
+          _lastVadScore > _vadThreshold) {
         _consecutiveHighVadCount++;
         debugPrint(
             '🎤 High VAD score detected during agent speech: $_lastVadScore (count: $_consecutiveHighVadCount)');
 
         // If we detect sustained user speech, trigger interruption
-        if (_consecutiveHighVadCount >= 2) {
+        // Reduced threshold for faster response (was 2, now 1 for immediate response)
+        if (_consecutiveHighVadCount >= 1) {
           debugPrint(
               '🎤 Sustained user speech detected - triggering interruption');
           _handleUserInterruption();
@@ -331,6 +388,12 @@ class ConversationalAIService {
   Future<void> _connect() async {
     _stateController.add(ConversationState.connecting);
     _connectionController.add('connecting');
+
+    // Reset interruption state on new connection
+    _isInterrupted = false;
+    _lastInterruptionTime = null;
+    _currentAudioSessionId = '';
+
     try {
       final uri = Uri.parse(
           'wss://api.elevenlabs.io/v1/convai/conversation?agent_id=${Uri.encodeComponent(_agentId)}');
@@ -351,7 +414,8 @@ class ConversationalAIService {
       _reconnectAttempts = 0;
       _stateController.add(ConversationState.connected);
       _connectionController.add('connected');
-      debugPrint('🔌 Conversational AI Service connected successfully');
+      debugPrint(
+          '🔌 Conversational AI Service connected successfully with clean state');
     } catch (e) {
       debugPrint('❌ Connection error: $e');
       _handleError(e);
@@ -463,13 +527,27 @@ class ConversationalAIService {
     }
   }
 
-  void _handleAudioChunk(Uint8List audioChunk) {
+  Future<void> _handleAudioChunk(Uint8List audioChunk) async {
     if (!_isConnected) {
       return;
     }
 
     // Calculate audio level for local monitoring
     double audioLevel = _calculateAudioLevel(audioChunk);
+
+    // Enhanced local interruption detection
+    if (_isAgentSpeaking && !_isInterrupted && audioLevel > 0.15) {
+      debugPrint(
+          '🎤 High local audio level detected during agent speech: ${audioLevel.toStringAsFixed(3)}');
+
+      // Trigger immediate interruption on strong local audio signal
+      if (audioLevel > 0.3) {
+        debugPrint(
+            '🎤 Strong user audio detected - triggering immediate interruption');
+        await _handleUserInterruption();
+        return; // Don't send this chunk if we're interrupting
+      }
+    }
 
     // Continue sending audio chunks even when agent is speaking
     // This allows server-side turn detection and interruption handling
@@ -664,6 +742,16 @@ class ConversationalAIService {
       await stopRecording();
     }
 
+    // Handle any active audio interruption
+    if (_isAgentSpeaking) {
+      await _handleUserInterruption();
+    }
+
+    // Reset interruption state
+    _isInterrupted = false;
+    _lastInterruptionTime = null;
+    _currentAudioSessionId = '';
+
     // Cancel VAD monitoring
     _vadMonitorTimer?.cancel();
 
@@ -691,5 +779,7 @@ class ConversationalAIService {
       _deleteTempFile(path);
     }
     _tempFilePaths.clear();
+
+    debugPrint('🔌 Conversational AI Service disposed with enhanced cleanup');
   }
 }
