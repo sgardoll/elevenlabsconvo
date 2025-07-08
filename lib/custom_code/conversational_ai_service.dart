@@ -54,7 +54,7 @@ class ConversationalAIService {
   // --- REFACTORED AUDIO COMPONENTS ---
   final AudioPlayer _player = AudioPlayer();
   late ConcatenatingAudioSource _playlist;
-  int _tempFileCounter = 0;
+  final List<String> _tempFilePaths = []; // Track file paths
   // --- END REFACTORED AUDIO COMPONENTS ---
 
   // Configuration
@@ -69,9 +69,16 @@ class ConversationalAIService {
   int _reconnectAttempts = 0;
   Timer? _reconnectTimer;
   StreamSubscription<Uint8List>? _audioStreamSubscription;
-
-  // Audio feedback prevention
   bool _recordingPaused = false;
+  int _tempFileCounter = 0;
+  StreamSubscription? _playerStateSubscription;
+  StreamSubscription? _currentIndexSubscription;
+
+  // Enhanced turn detection
+  double _lastVadScore = 0.0;
+  double _vadThreshold = 0.4;
+  int _consecutiveHighVadCount = 0;
+  Timer? _vadMonitorTimer;
 
   // Reactive streams for UI
   final _conversationController =
@@ -93,10 +100,6 @@ class ConversationalAIService {
   bool get isConnected => _isConnected;
   ConversationState get currentState => _getCurrentState();
 
-  // =============================================================================
-  // 1. CONNECTION MANAGEMENT
-  // =============================================================================
-
   Future<String> initialize(
       {required String apiKey, required String agentId}) async {
     if (_apiKey == apiKey && _agentId == agentId && _isConnected) {
@@ -108,25 +111,35 @@ class ConversationalAIService {
     _apiKey = apiKey;
     _agentId = agentId;
 
-    // --- NEW: Initialize playlist and player state listener ---
     _playlist = ConcatenatingAudioSource(children: []);
-    _player.playerStateStream.listen((state) {
+
+    // Cancel previous subscriptions if they exist
+    await _playerStateSubscription?.cancel();
+    await _currentIndexSubscription?.cancel();
+
+    // Listen for when the entire playlist completes
+    _playerStateSubscription = _player.playerStateStream.listen((state) {
       if (state.processingState == ProcessingState.completed) {
         _resetAgentSpeakingState();
       }
     });
-    // --- END NEW ---
+
+    // Listen for when the player moves to the next track to clean up the previous one
+    _currentIndexSubscription = _player.currentIndexStream.listen((index) {
+      if (index != null && index > 0) {
+        // We've moved to a new track, so the previous one (at index - 1) can be deleted
+        final fileToDelete = _tempFilePaths[index - 1];
+        _deleteTempFile(fileToDelete);
+      }
+    });
 
     try {
       await _connect();
-
-      // Update FFAppState
       FFAppState().update(() {
         FFAppState().wsConnectionState = 'connected';
         FFAppState().elevenLabsApiKey = apiKey;
         FFAppState().elevenLabsAgentId = agentId;
       });
-
       return 'success';
     } catch (e) {
       debugPrint('❌ Error initializing service: $e');
@@ -134,14 +147,193 @@ class ConversationalAIService {
     }
   }
 
+  Future<void> _playAudio(String base64Audio) async {
+    try {
+      if (!_isAgentSpeaking) {
+        _isAgentSpeaking = true;
+        // Don't pause recording - allow continuous audio for turn detection
+        _recordingPaused = false;
+        _stateController.add(ConversationState.playing);
+        // Ensure old playlist and files are cleared before starting a new one
+        await _clearPlaylistAndFiles();
+        await _player.setAudioSource(_playlist);
+        debugPrint(
+            '🔊 Started new audio session (recording continues for turn detection)');
+      }
+
+      final audioBytes = base64Decode(base64Audio);
+      if (audioBytes.length < 10) return;
+
+      final wavBytes = _createWavFile(audioBytes);
+      final tempFile = await _createTempFile(wavBytes);
+
+      _tempFilePaths.add(tempFile.path);
+      await _playlist.add(AudioSource.uri(Uri.file(tempFile.path)));
+      debugPrint(
+          '🔊 Added audio chunk to playlist. Total chunks: ${_playlist.length}');
+
+      if (!_player.playing) {
+        _player.play();
+        debugPrint('🔊 Started playlist playback');
+      }
+    } catch (e) {
+      debugPrint('❌ Error playing audio: $e');
+    }
+  }
+
+  void _resetAgentSpeakingState() async {
+    debugPrint('🔊 Resetting agent speaking state');
+    _isAgentSpeaking = false;
+    _recordingPaused = false;
+    _stateController.add(
+        _isConnected ? ConversationState.connected : ConversationState.idle);
+    await _clearPlaylistAndFiles();
+  }
+
+  // Handle user interruption by immediately stopping agent audio
+  void _handleUserInterruption() async {
+    debugPrint('🔊 User interrupted agent - stopping audio immediately');
+    if (_isAgentSpeaking) {
+      // Stop audio playback immediately
+      await _player.stop();
+
+      // Clear the playlist to prevent further playback
+      await _playlist.clear();
+
+      // Reset speaking state
+      _isAgentSpeaking = false;
+      _recordingPaused = false;
+
+      // Update UI state
+      _stateController.add(
+          _isConnected ? ConversationState.connected : ConversationState.idle);
+
+      // Clean up temp files
+      for (final path in _tempFilePaths) {
+        _deleteTempFile(path);
+      }
+      _tempFilePaths.clear();
+      _tempFileCounter = 0;
+    }
+  }
+
+  // Handle VAD scores for enhanced turn detection
+  void _handleVadScore(Map<String, dynamic> data) {
+    final vadScore = data['vad_score_event']?['score'];
+    if (vadScore != null) {
+      _lastVadScore = vadScore.toDouble();
+
+      // Monitor for user speech during agent speaking
+      if (_isAgentSpeaking && _lastVadScore > _vadThreshold) {
+        _consecutiveHighVadCount++;
+        debugPrint(
+            '🎤 High VAD score detected during agent speech: $_lastVadScore (count: $_consecutiveHighVadCount)');
+
+        // If we detect sustained user speech, trigger interruption
+        if (_consecutiveHighVadCount >= 2) {
+          debugPrint(
+              '🎤 Sustained user speech detected - triggering interruption');
+          _handleUserInterruption();
+          _consecutiveHighVadCount = 0;
+        }
+      } else if (_lastVadScore <= _vadThreshold) {
+        _consecutiveHighVadCount = 0;
+      }
+    }
+  }
+
+  // Enhanced audio level monitoring
+  double _calculateAudioLevel(Uint8List audioChunk) {
+    if (audioChunk.isEmpty) return 0.0;
+
+    double sum = 0.0;
+    for (int i = 0; i < audioChunk.length; i += 2) {
+      if (i + 1 < audioChunk.length) {
+        // Convert 16-bit PCM to amplitude
+        int sample = (audioChunk[i + 1] << 8) | audioChunk[i];
+        if (sample > 32767) sample -= 65536;
+        sum += sample.abs();
+      }
+    }
+
+    double average = sum / (audioChunk.length / 2);
+    return average / 32767.0; // Normalize to 0-1 range
+  }
+
+  Future<void> _clearPlaylistAndFiles() async {
+    await _player.stop();
+    await _playlist.clear();
+    for (final path in _tempFilePaths) {
+      _deleteTempFile(path);
+    }
+    _tempFilePaths.clear();
+    _tempFileCounter = 0;
+  }
+
+  void _deleteTempFile(String path) {
+    try {
+      final file = File(path);
+      if (file.existsSync()) {
+        file.deleteSync();
+        debugPrint('🗑️ Deleted temp file: $path');
+      }
+    } catch (e) {
+      debugPrint('⚠️ Could not delete temp file $path: $e');
+    }
+  }
+
+  Uint8List _createWavFile(Uint8List pcmData) {
+    const int sampleRate = 16000;
+    const int bitsPerSample = 16;
+    const int channels = 1;
+    final int dataSize = pcmData.length;
+    final int fileSize = 44 + dataSize;
+    final ByteData wavHeader = ByteData(44);
+    wavHeader.setUint8(0, 0x52); // 'R'
+    wavHeader.setUint8(1, 0x49); // 'I'
+    wavHeader.setUint8(2, 0x46); // 'F'
+    wavHeader.setUint8(3, 0x46); // 'F'
+    wavHeader.setUint32(4, fileSize - 8, Endian.little);
+    wavHeader.setUint8(8, 0x57); // 'W'
+    wavHeader.setUint8(9, 0x41); // 'A'
+    wavHeader.setUint8(10, 0x56); // 'V'
+    wavHeader.setUint8(11, 0x45); // 'E'
+    wavHeader.setUint8(12, 0x66); // 'f'
+    wavHeader.setUint8(13, 0x6d); // 'm'
+    wavHeader.setUint8(14, 0x74); // 't'
+    wavHeader.setUint8(15, 0x20); // ' '
+    wavHeader.setUint32(16, 16, Endian.little);
+    wavHeader.setUint16(20, 1, Endian.little);
+    wavHeader.setUint16(22, channels, Endian.little);
+    wavHeader.setUint32(24, sampleRate, Endian.little);
+    wavHeader.setUint32(
+        28, sampleRate * channels * bitsPerSample ~/ 8, Endian.little);
+    wavHeader.setUint16(32, channels * bitsPerSample ~/ 8, Endian.little);
+    wavHeader.setUint16(34, bitsPerSample, Endian.little);
+    wavHeader.setUint8(36, 0x64); // 'd'
+    wavHeader.setUint8(37, 0x61); // 'a'
+    wavHeader.setUint8(38, 0x74); // 't'
+    wavHeader.setUint8(39, 0x61); // 'a'
+    wavHeader.setUint32(40, dataSize, Endian.little);
+    final Uint8List wavFile = Uint8List(fileSize);
+    wavFile.setRange(0, 44, wavHeader.buffer.asUint8List());
+    wavFile.setRange(44, fileSize, pcmData);
+    return wavFile;
+  }
+
+  Future<File> _createTempFile(Uint8List data) async {
+    final dir = await getTemporaryDirectory();
+    final file = File('${dir.path}/temp_audio_${_tempFileCounter++}.wav');
+    await file.writeAsBytes(data);
+    return file;
+  }
+
   Future<void> _connect() async {
     _stateController.add(ConversationState.connecting);
     _connectionController.add('connecting');
-
     try {
       final uri = Uri.parse(
           'wss://api.elevenlabs.io/v1/convai/conversation?agent_id=${Uri.encodeComponent(_agentId)}');
-
       _channel = IOWebSocketChannel.connect(
         uri,
         headers: {
@@ -149,20 +341,16 @@ class ConversationalAIService {
           'User-Agent': 'ElevenLabs-Flutter-Consolidated/2.0',
         },
       );
-
       _channel!.stream.listen(
         _handleMessage,
         onError: _handleError,
         onDone: _handleDisconnect,
       );
-
       _sendInitialization();
       _isConnected = true;
       _reconnectAttempts = 0;
-
       _stateController.add(ConversationState.connected);
       _connectionController.add('connected');
-
       debugPrint('🔌 Conversational AI Service connected successfully');
     } catch (e) {
       debugPrint('❌ Connection error: $e');
@@ -177,9 +365,11 @@ class ConversationalAIService {
         'agent': {
           'language': 'en',
           'turn_detection': {
-            'type': 'client_vad',
-            'threshold': 0.6,
-            'silence_duration_ms': 1000
+            'type': 'server_vad',
+            'threshold': 0.4,
+            'silence_duration_ms': 500,
+            'prefix_padding_ms': 300,
+            'suffix_padding_ms': 200
           }
         },
         'tts': {
@@ -191,14 +381,10 @@ class ConversationalAIService {
         'modalities': ['audio']
       }
     });
-
     _channel!.sink.add(initMessage);
-    debugPrint('🔌 Initialization message sent');
+    debugPrint(
+        '🔌 Initialization message sent with server-side turn detection');
   }
-
-  // =============================================================================
-  // 2. RECORDING MANAGEMENT
-  // =============================================================================
 
   Future<String> toggleRecording() async {
     if (_isRecording) {
@@ -214,15 +400,12 @@ class ConversationalAIService {
           '⚠️ Cannot start recording - already recording or agent speaking');
       return 'error: Cannot start recording';
     }
-
     if (!_isConnected) {
       debugPrint('❌ Cannot start recording - not connected');
       return 'error: Not connected';
     }
-
     try {
       debugPrint('🎙️ Starting real-time recording...');
-
       final recordingStream = await _recorder.startStream(
         const RecordConfig(
           encoder: AudioEncoder.pcm16bits,
@@ -232,22 +415,17 @@ class ConversationalAIService {
           noiseSuppress: true,
         ),
       );
-
       _audioStreamSubscription = recordingStream.listen(
         _handleAudioChunk,
         onError: (error) => debugPrint('❌ Audio stream error: $error'),
         onDone: () => debugPrint('🎙️ Audio stream ended'),
       );
-
       _isRecording = true;
       _recordingController.add(true);
       _stateController.add(ConversationState.recording);
-
-      // Update FFAppState
       FFAppState().update(() {
         FFAppState().isRecording = true;
       });
-
       debugPrint('🎙️ Recording started successfully');
       return 'success';
     } catch (e) {
@@ -261,30 +439,22 @@ class ConversationalAIService {
       debugPrint('⚠️ Not currently recording');
       return 'error: Not recording';
     }
-
     try {
       debugPrint('🎙️ Stopping recording...');
-
       await _recorder.stop();
       await _audioStreamSubscription?.cancel();
       _audioStreamSubscription = null;
-
-      // Send end-of-turn signal
       if (_isConnected) {
         _channel!.sink.add(jsonEncode({'type': 'user_turn_ended'}));
         await _sendUserActivity();
       }
-
       _isRecording = false;
       _recordingController.add(false);
       _stateController.add(
           _isConnected ? ConversationState.connected : ConversationState.idle);
-
-      // Update FFAppState
       FFAppState().update(() {
         FFAppState().isRecording = false;
       });
-
       debugPrint('🎙️ Recording stopped successfully');
       return 'success';
     } catch (e) {
@@ -294,28 +464,34 @@ class ConversationalAIService {
   }
 
   void _handleAudioChunk(Uint8List audioChunk) {
-    if (!_isConnected || _isAgentSpeaking || _recordingPaused) {
+    if (!_isConnected) {
       return;
     }
 
+    // Calculate audio level for local monitoring
+    double audioLevel = _calculateAudioLevel(audioChunk);
+
+    // Continue sending audio chunks even when agent is speaking
+    // This allows server-side turn detection and interruption handling
     try {
       final base64Audio = base64Encode(audioChunk);
       final audioMessage = jsonEncode({'user_audio_chunk': base64Audio});
       _channel!.sink.add(audioMessage);
+
+      // Log high audio levels during agent speech for debugging
+      if (_isAgentSpeaking && audioLevel > 0.1) {
+        debugPrint(
+            '🎤 User audio level during agent speech: ${audioLevel.toStringAsFixed(3)}');
+      }
     } catch (e) {
       debugPrint('❌ Error sending audio chunk: $e');
     }
   }
 
-  // =============================================================================
-  // 3. MESSAGE HANDLING (consolidates WebSocket message processing)
-  // =============================================================================
-
   void _handleMessage(dynamic message) {
     try {
       final jsonData = jsonDecode(message);
       final messageType = jsonData['type'] ?? 'unknown';
-
       switch (messageType) {
         case 'conversation_initiation_metadata':
           _handleConversationInit(jsonData);
@@ -347,14 +523,12 @@ class ConversationalAIService {
     _conversationId =
         data['conversation_initiation_metadata_event']?['conversation_id'];
     debugPrint('🔌 Conversation ID: $_conversationId');
-
     final message = ConversationMessage(
       type: 'system',
       content: 'Conversational AI 2.0 session started',
       timestamp: DateTime.now(),
       conversationId: _conversationId,
     );
-
     _conversationController.add(message);
     _updateFFAppStateMessages(message);
   }
@@ -367,7 +541,6 @@ class ConversationalAIService {
         content: transcript,
         timestamp: DateTime.now(),
       );
-
       _conversationController.add(message);
       _updateFFAppStateMessages(message);
       debugPrint('👤 User: $transcript');
@@ -382,7 +555,6 @@ class ConversationalAIService {
         content: response,
         timestamp: DateTime.now(),
       );
-
       _conversationController.add(message);
       _updateFFAppStateMessages(message);
       debugPrint('🤖 Agent: $response');
@@ -396,162 +568,26 @@ class ConversationalAIService {
     }
   }
 
-  void _handleVadScore(Map<String, dynamic> data) {
-    final vadScore = data['vad_score_event']?['vad_score'];
-    // Could be used for UI feedback if needed
-  }
-
   void _handleInterruption(Map<String, dynamic> data) {
     final reason = data['interruption_event']?['reason'];
     debugPrint('🔌 Conversation interrupted: $reason');
+
+    // Immediately stop agent audio when user interrupts
+    _handleUserInterruption();
 
     final message = ConversationMessage(
       type: 'system',
       content: 'Conversation interrupted: $reason',
       timestamp: DateTime.now(),
     );
-
     _conversationController.add(message);
     _updateFFAppStateMessages(message);
   }
-
-  // =============================================================================
-  // 4. REFACTORED AUDIO PLAYBACK
-  // =============================================================================
-
-  Future<void> _playAudio(String base64Audio) async {
-    try {
-      if (!_isAgentSpeaking) {
-        _isAgentSpeaking = true;
-        _recordingPaused = true;
-        _stateController.add(ConversationState.playing);
-        // Clear old playlist and set the source for the player
-        await _playlist.clear();
-        await _player.setAudioSource(_playlist);
-        debugPrint('🔊 Started new audio session');
-      }
-
-      final audioBytes = base64Decode(base64Audio);
-      if (audioBytes.length < 10) {
-        debugPrint('🔊 Audio chunk too small, skipping');
-        return;
-      }
-
-      final wavBytes = _createWavFile(audioBytes);
-      final tempFile = await _createTempFile(wavBytes);
-
-      // Add the new audio file to the playlist
-      await _playlist.add(AudioSource.uri(Uri.file(tempFile.path)));
-      debugPrint(
-          '🔊 Added audio chunk to playlist. Total chunks: ${_playlist.length}');
-
-      // Start playing if we aren't already
-      if (!_player.playing) {
-        await _player.play();
-        debugPrint('🔊 Started playlist playback');
-      }
-    } catch (e) {
-      debugPrint('❌ Error playing audio: $e');
-    }
-  }
-
-  void _resetAgentSpeakingState() async {
-    debugPrint('🔊 Resetting agent speaking state');
-    _isAgentSpeaking = false;
-    _recordingPaused = false;
-    _stateController.add(
-        _isConnected ? ConversationState.connected : ConversationState.idle);
-
-    // Clean up temporary files from the completed playlist
-    try {
-      final dir = await getTemporaryDirectory();
-      final directory = Directory(dir.path);
-      if (await directory.exists()) {
-        final files = directory.listSync();
-        for (var file in files) {
-          if (file.path.contains('temp_audio_') && file.path.endsWith('.wav')) {
-            try {
-              file.deleteSync();
-              debugPrint('🗑️ Deleted temp file: ${file.path}');
-            } catch (e) {
-              debugPrint('⚠️ Could not delete temp file: $e');
-            }
-          }
-        }
-      }
-    } catch (e) {
-      debugPrint('⚠️ Error cleaning up temp files: $e');
-    }
-
-    _tempFileCounter = 0;
-  }
-
-  Uint8List _createWavFile(Uint8List pcmData) {
-    const int sampleRate = 16000;
-    const int bitsPerSample = 16;
-    const int channels = 1;
-    final int dataSize = pcmData.length;
-    final int fileSize = 44 + dataSize;
-
-    final ByteData wavHeader = ByteData(44);
-
-    // RIFF header
-    wavHeader.setUint8(0, 0x52); // 'R'
-    wavHeader.setUint8(1, 0x49); // 'I'
-    wavHeader.setUint8(2, 0x46); // 'F'
-    wavHeader.setUint8(3, 0x46); // 'F'
-    wavHeader.setUint32(4, fileSize - 8, Endian.little);
-
-    // WAVE header
-    wavHeader.setUint8(8, 0x57); // 'W'
-    wavHeader.setUint8(9, 0x41); // 'A'
-    wavHeader.setUint8(10, 0x56); // 'V'
-    wavHeader.setUint8(11, 0x45); // 'E'
-
-    // fmt chunk
-    wavHeader.setUint8(12, 0x66); // 'f'
-    wavHeader.setUint8(13, 0x6d); // 'm'
-    wavHeader.setUint8(14, 0x74); // 't'
-    wavHeader.setUint8(15, 0x20); // ' '
-    wavHeader.setUint32(16, 16, Endian.little);
-    wavHeader.setUint16(20, 1, Endian.little);
-    wavHeader.setUint16(22, channels, Endian.little);
-    wavHeader.setUint32(24, sampleRate, Endian.little);
-    wavHeader.setUint32(
-        28, sampleRate * channels * bitsPerSample ~/ 8, Endian.little);
-    wavHeader.setUint16(32, channels * bitsPerSample ~/ 8, Endian.little);
-    wavHeader.setUint16(34, bitsPerSample, Endian.little);
-
-    // data chunk
-    wavHeader.setUint8(36, 0x64); // 'd'
-    wavHeader.setUint8(37, 0x61); // 'a'
-    wavHeader.setUint8(38, 0x74); // 't'
-    wavHeader.setUint8(39, 0x61); // 'a'
-    wavHeader.setUint32(40, dataSize, Endian.little);
-
-    final Uint8List wavFile = Uint8List(fileSize);
-    wavFile.setRange(0, 44, wavHeader.buffer.asUint8List());
-    wavFile.setRange(44, fileSize, pcmData);
-
-    return wavFile;
-  }
-
-  Future<File> _createTempFile(Uint8List data) async {
-    final dir = await getTemporaryDirectory();
-    final file = File('${dir.path}/temp_audio_${_tempFileCounter++}.wav');
-    await file.writeAsBytes(data);
-    return file;
-  }
-
-  // =============================================================================
-  // 5. TEXT MESSAGING (implements sendTextToWebSocket)
-  // =============================================================================
 
   Future<String> sendTextMessage(String text) async {
     if (!_isConnected) {
       return 'error: Not connected';
     }
-
     try {
       final textMessage = jsonEncode({'type': 'user_message', 'text': text});
       _channel!.sink.add(textMessage);
@@ -562,10 +598,6 @@ class ConversationalAIService {
       return 'error: ${e.toString()}';
     }
   }
-
-  // =============================================================================
-  // 6. UTILITY METHODS
-  // =============================================================================
 
   Future<void> _sendUserActivity() async {
     if (_isConnected) {
@@ -597,12 +629,10 @@ class ConversationalAIService {
     debugPrint('❌ Service error: $error');
     _stateController.add(ConversationState.error);
     _connectionController.add('error: ${error.toString()}');
-
     FFAppState().update(() {
       FFAppState().wsConnectionState =
           'error: ${error.toString().substring(0, math.min(50, error.toString().length))}';
     });
-
     _scheduleReconnect();
   }
 
@@ -611,11 +641,9 @@ class ConversationalAIService {
     _isConnected = false;
     _stateController.add(ConversationState.idle);
     _connectionController.add('disconnected');
-
     FFAppState().update(() {
       FFAppState().wsConnectionState = 'disconnected';
     });
-
     _scheduleReconnect();
   }
 
@@ -624,37 +652,44 @@ class ConversationalAIService {
       debugPrint('🔌 Maximum reconnect attempts reached');
       return;
     }
-
     _reconnectTimer?.cancel();
     final delay = Duration(seconds: math.pow(2, _reconnectAttempts).toInt());
     _reconnectTimer = Timer(delay, () => _connect());
     _reconnectAttempts++;
   }
 
-  // =============================================================================
-  // 7. CLEANUP
-  // =============================================================================
-
   Future<void> dispose() async {
     debugPrint('🔌 Disposing Conversational AI Service');
-
     if (_isRecording) {
       await stopRecording();
     }
 
-    // --- NEW: Stop and dispose the single player ---
-    await _player.stop();
-    await _player.dispose();
-    // --- END NEW ---
+    // Cancel VAD monitoring
+    _vadMonitorTimer?.cancel();
 
+    // Clean up audio components
+    await _player.dispose();
+    await _playerStateSubscription?.cancel();
+    await _currentIndexSubscription?.cancel();
+
+    // Close connection
     await _channel?.sink.close();
     await _recorder.dispose();
     await _audioStreamSubscription?.cancel();
+
+    // Cancel timers
     _reconnectTimer?.cancel();
 
+    // Close streams
     await _conversationController.close();
     await _stateController.close();
     await _recordingController.close();
     await _connectionController.close();
+
+    // Clean up temporary files
+    for (final path in _tempFilePaths) {
+      _deleteTempFile(path);
+    }
+    _tempFilePaths.clear();
   }
 }
