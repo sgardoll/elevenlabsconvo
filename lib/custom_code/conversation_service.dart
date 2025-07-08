@@ -59,7 +59,8 @@ class AppState {
 
 class ConversationService {
   // Singleton instance
-  static final ConversationService instance = ConversationService._privateConstructor();
+  static final ConversationService instance =
+      ConversationService._privateConstructor();
 
   ConversationService._privateConstructor() {
     _webSocketManager = WebSocketManager.instance;
@@ -72,7 +73,8 @@ class ConversationService {
   late final AudioService _audioService;
 
   // State stream
-  final StreamController<AppState> _stateController = StreamController<AppState>.broadcast();
+  final StreamController<AppState> _stateController =
+      StreamController<AppState>.broadcast();
   Stream<AppState> get stateStream => _stateController.stream;
 
   // Current state
@@ -110,37 +112,44 @@ class ConversationService {
 
   void _initializeStreamListeners() {
     // Listen to WebSocket connection status
-    _connectionStatusSubscription = _webSocketManager.connectionStatusStream.listen((status) {
+    _connectionStatusSubscription =
+        _webSocketManager.connectionStatusStream.listen((status) {
       _updateState(_currentState.copyWith(connectionStatus: status));
     });
 
     // Listen to conversation state
-    _conversationStateSubscription = _webSocketManager.conversationStateStream.listen((state) {
+    _conversationStateSubscription =
+        _webSocketManager.conversationStateStream.listen((state) {
       _updateState(_currentState.copyWith(conversationState: state));
     });
 
     // Listen to chat history
-    _chatHistorySubscription = _webSocketManager.chatHistoryStream.listen((history) {
+    _chatHistorySubscription =
+        _webSocketManager.chatHistoryStream.listen((history) {
       _updateState(_currentState.copyWith(chatHistory: history));
     });
 
     // Listen to bot speaking status
-    _isBotSpeakingSubscription = _webSocketManager.isBotSpeakingStream.listen((speaking) {
+    _isBotSpeakingSubscription =
+        _webSocketManager.isBotSpeakingStream.listen((speaking) {
       _updateState(_currentState.copyWith(isBotSpeaking: speaking));
     });
 
     // Listen to user speaking status
-    _isUserSpeakingSubscription = _webSocketManager.isUserSpeakingStream.listen((speaking) {
+    _isUserSpeakingSubscription =
+        _webSocketManager.isUserSpeakingStream.listen((speaking) {
       _updateState(_currentState.copyWith(isUserSpeaking: speaking));
     });
 
     // Listen to audio playback status
-    _isPlayingAudioSubscription = _audioService.isPlayingStream.listen((playing) {
+    _isPlayingAudioSubscription =
+        _audioService.isPlayingStream.listen((playing) {
       _updateState(_currentState.copyWith(isPlayingAudio: playing));
     });
 
     // Listen to audio buffering status
-    _isBufferingAudioSubscription = _audioService.isBufferingStream.listen((buffering) {
+    _isBufferingAudioSubscription =
+        _audioService.isBufferingStream.listen((buffering) {
       _updateState(_currentState.copyWith(isBufferingAudio: buffering));
     });
 
@@ -169,7 +178,8 @@ class ConversationService {
   }
 
   // Service methods
-  Future<void> initialize({required String apiKey, required String agentId}) async {
+  Future<void> initialize(
+      {required String apiKey, required String agentId}) async {
     try {
       await _webSocketManager.initialize(apiKey: apiKey, agentId: agentId);
     } catch (e) {
@@ -251,9 +261,9 @@ class ConversationService {
     }
   }
 
-  bool get canRecord => 
-    _currentState.connectionStatus == ConnectionStatus.connected &&
-    !_currentState.isBotSpeaking;
+  bool get canRecord =>
+      _currentState.connectionStatus == ConnectionStatus.connected &&
+      !_currentState.isBotSpeaking;
 
   bool get shouldShowError => _currentState.errorMessage != null;
 
