@@ -37,8 +37,8 @@ class _HomePageWidgetState extends State<HomePageWidget> {
       _model.initializeElevenlabsWebsocket =
           await actions.initializeConversationService(
         context,
-        FFLibraryValues().elevenlabsApiKey,
-        FFLibraryValues().elevenlabsAgentId,
+        FFAppState().elevenLabsApiKey,
+        FFAppState().elevenLabsAgentId,
       );
     });
   }
