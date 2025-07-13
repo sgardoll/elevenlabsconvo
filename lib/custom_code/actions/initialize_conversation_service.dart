@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 // Begin custom action code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
-import '/custom_code/conversational_ai_service.dart';
+import '../conversational_ai_service.dart';
 
 /// Initialize the Consolidated Conversational AI Service using a signed URL
 /// Replaces the complex initializeWebSocket action with a simple service call
