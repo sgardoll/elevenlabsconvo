@@ -27,6 +27,22 @@ class FFAppState extends ChangeNotifier {
     await _safeInitAsync(() async {
       _endpoint = await secureStorage.getString('ff_endpoint') ?? _endpoint;
     });
+    await _safeInitAsync(() async {
+      _isSignedUrlExpired =
+          await secureStorage.getBool('ff_isSignedUrlExpired') ??
+              _isSignedUrlExpired;
+    });
+    await _safeInitAsync(() async {
+      _cachedSignedUrl = await secureStorage.getString('ff_cachedSignedUrl') ??
+          _cachedSignedUrl;
+    });
+    await _safeInitAsync(() async {
+      _signedUrlExpirationTime =
+          await secureStorage.read(key: 'ff_signedUrlExpirationTime') != null
+              ? DateTime.fromMillisecondsSinceEpoch(
+                  (await secureStorage.getInt('ff_signedUrlExpirationTime'))!)
+              : _signedUrlExpirationTime;
+    });
   }
 
   void update(VoidCallback callback) {
@@ -103,6 +119,42 @@ class FFAppState extends ChangeNotifier {
 
   void deleteEndpoint() {
     secureStorage.delete(key: 'ff_endpoint');
+  }
+
+  bool _isSignedUrlExpired = false;
+  bool get isSignedUrlExpired => _isSignedUrlExpired;
+  set isSignedUrlExpired(bool value) {
+    _isSignedUrlExpired = value;
+    secureStorage.setBool('ff_isSignedUrlExpired', value);
+  }
+
+  void deleteIsSignedUrlExpired() {
+    secureStorage.delete(key: 'ff_isSignedUrlExpired');
+  }
+
+  String _cachedSignedUrl = '';
+  String get cachedSignedUrl => _cachedSignedUrl;
+  set cachedSignedUrl(String value) {
+    _cachedSignedUrl = value;
+    secureStorage.setString('ff_cachedSignedUrl', value);
+  }
+
+  void deleteCachedSignedUrl() {
+    secureStorage.delete(key: 'ff_cachedSignedUrl');
+  }
+
+  DateTime? _signedUrlExpirationTime;
+  DateTime? get signedUrlExpirationTime => _signedUrlExpirationTime;
+  set signedUrlExpirationTime(DateTime? value) {
+    _signedUrlExpirationTime = value;
+    value != null
+        ? secureStorage.setInt(
+            'ff_signedUrlExpirationTime', value.millisecondsSinceEpoch)
+        : secureStorage.remove('ff_signedUrlExpirationTime');
+  }
+
+  void deleteSignedUrlExpirationTime() {
+    secureStorage.delete(key: 'ff_signedUrlExpirationTime');
   }
 }
 

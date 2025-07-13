@@ -1,8 +1,6 @@
 import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
-import 'websocket_manager.dart';
-import 'audio_service.dart';
 
 // App state models
 class AppState {

@@ -35,8 +35,11 @@ class _ConversationalDemoWidgetState extends State<ConversationalDemoWidget> {
     SchedulerBinding.instance.addPostFrameCallback((_) async {
       await requestPermission(microphonePermission);
       await requestPermission(bluetoothPermission);
-      _model.initializeElevenlabsWebsocket =
-          await actions.initializeConversationService(
+      _model.signedUrlResponse = await actions.getSignedUrl(
+        FFLibraryValues().agentId,
+        FFLibraryValues().endpoint,
+      );
+      _model.initConvoAi = await actions.initializeConversationService(
         context,
         FFLibraryValues().agentId,
         FFLibraryValues().endpoint,
