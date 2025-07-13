@@ -48,7 +48,7 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
                 ),
               ),
             )
-          : DemoWidget(),
+          : ConversationalDemoWidget(),
       routes: [
         FFRoute(
           name: '_initialize',
@@ -66,17 +66,12 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
                     ),
                   ),
                 )
-              : DemoWidget(),
+              : ConversationalDemoWidget(),
         ),
         FFRoute(
-          name: HomePageWidget.routeName,
-          path: HomePageWidget.routePath,
-          builder: (context, params) => HomePageWidget(),
-        ),
-        FFRoute(
-          name: DemoWidget.routeName,
-          path: DemoWidget.routePath,
-          builder: (context, params) => DemoWidget(),
+          name: ConversationalDemoWidget.routeName,
+          path: ConversationalDemoWidget.routePath,
+          builder: (context, params) => ConversationalDemoWidget(),
         )
       ].map((r) => r.toRoute(appStateNotifier)).toList(),
     );

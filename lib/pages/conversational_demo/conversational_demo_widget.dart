@@ -7,38 +7,42 @@ import '/flutter_flow/permissions_util.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
-import 'home_page_model.dart';
-export 'home_page_model.dart';
+import 'conversational_demo_model.dart';
+export 'conversational_demo_model.dart';
 
-class HomePageWidget extends StatefulWidget {
-  const HomePageWidget({super.key});
+class ConversationalDemoWidget extends StatefulWidget {
+  const ConversationalDemoWidget({super.key});
 
-  static String routeName = 'HomePage';
-  static String routePath = '/homePage';
+  static String routeName = 'ConversationalDemo';
+  static String routePath = '/conversationalDemo';
 
   @override
-  State<HomePageWidget> createState() => _HomePageWidgetState();
+  State<ConversationalDemoWidget> createState() =>
+      _ConversationalDemoWidgetState();
 }
 
-class _HomePageWidgetState extends State<HomePageWidget> {
-  late HomePageModel _model;
+class _ConversationalDemoWidgetState extends State<ConversationalDemoWidget> {
+  late ConversationalDemoModel _model;
 
   final scaffoldKey = GlobalKey<ScaffoldState>();
 
   @override
   void initState() {
     super.initState();
-    _model = createModel(context, () => HomePageModel());
+    _model = createModel(context, () => ConversationalDemoModel());
 
     // On page load action.
     SchedulerBinding.instance.addPostFrameCallback((_) async {
       await requestPermission(microphonePermission);
       await requestPermission(bluetoothPermission);
-      _model.initializeElevenlabsWebsocket =
-          await actions.initializeConversationService(
+      _model.signedUrlResponse = await actions.getSignedUrl(
+        FFLibraryValues().agentId,
+        FFLibraryValues().endpoint,
+      );
+      _model.initConvoAi = await actions.initializeConversationService(
         context,
-        FFAppState().elevenLabsApiKey,
-        FFAppState().elevenLabsAgentId,
+        FFLibraryValues().agentId,
+        FFLibraryValues().endpoint,
       );
     });
   }

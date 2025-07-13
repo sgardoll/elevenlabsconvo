@@ -20,14 +20,28 @@ class FFAppState extends ChangeNotifier {
   Future initializePersistedState() async {
     secureStorage = FlutterSecureStorage();
     await _safeInitAsync(() async {
-      _elevenLabsApiKey =
-          await secureStorage.getString('ff_elevenLabsApiKey') ??
-              _elevenLabsApiKey;
-    });
-    await _safeInitAsync(() async {
       _elevenLabsAgentId =
           await secureStorage.getString('ff_elevenLabsAgentId') ??
               _elevenLabsAgentId;
+    });
+    await _safeInitAsync(() async {
+      _endpoint = await secureStorage.getString('ff_endpoint') ?? _endpoint;
+    });
+    await _safeInitAsync(() async {
+      _isSignedUrlExpired =
+          await secureStorage.getBool('ff_isSignedUrlExpired') ??
+              _isSignedUrlExpired;
+    });
+    await _safeInitAsync(() async {
+      _cachedSignedUrl = await secureStorage.getString('ff_cachedSignedUrl') ??
+          _cachedSignedUrl;
+    });
+    await _safeInitAsync(() async {
+      _signedUrlExpirationTime =
+          await secureStorage.read(key: 'ff_signedUrlExpirationTime') != null
+              ? DateTime.fromMillisecondsSinceEpoch(
+                  (await secureStorage.getInt('ff_signedUrlExpirationTime'))!)
+              : _signedUrlExpirationTime;
     });
   }
 
@@ -79,17 +93,6 @@ class FFAppState extends ChangeNotifier {
     _wsConnectionState = value;
   }
 
-  String _elevenLabsApiKey = '';
-  String get elevenLabsApiKey => _elevenLabsApiKey;
-  set elevenLabsApiKey(String value) {
-    _elevenLabsApiKey = value;
-    secureStorage.setString('ff_elevenLabsApiKey', value);
-  }
-
-  void deleteElevenLabsApiKey() {
-    secureStorage.delete(key: 'ff_elevenLabsApiKey');
-  }
-
   String _elevenLabsAgentId = '';
   String get elevenLabsAgentId => _elevenLabsAgentId;
   set elevenLabsAgentId(String value) {
@@ -105,6 +108,53 @@ class FFAppState extends ChangeNotifier {
   bool get isRecording => _isRecording;
   set isRecording(bool value) {
     _isRecording = value;
+  }
+
+  String _endpoint = '';
+  String get endpoint => _endpoint;
+  set endpoint(String value) {
+    _endpoint = value;
+    secureStorage.setString('ff_endpoint', value);
+  }
+
+  void deleteEndpoint() {
+    secureStorage.delete(key: 'ff_endpoint');
+  }
+
+  bool _isSignedUrlExpired = false;
+  bool get isSignedUrlExpired => _isSignedUrlExpired;
+  set isSignedUrlExpired(bool value) {
+    _isSignedUrlExpired = value;
+    secureStorage.setBool('ff_isSignedUrlExpired', value);
+  }
+
+  void deleteIsSignedUrlExpired() {
+    secureStorage.delete(key: 'ff_isSignedUrlExpired');
+  }
+
+  String _cachedSignedUrl = '';
+  String get cachedSignedUrl => _cachedSignedUrl;
+  set cachedSignedUrl(String value) {
+    _cachedSignedUrl = value;
+    secureStorage.setString('ff_cachedSignedUrl', value);
+  }
+
+  void deleteCachedSignedUrl() {
+    secureStorage.delete(key: 'ff_cachedSignedUrl');
+  }
+
+  DateTime? _signedUrlExpirationTime;
+  DateTime? get signedUrlExpirationTime => _signedUrlExpirationTime;
+  set signedUrlExpirationTime(DateTime? value) {
+    _signedUrlExpirationTime = value;
+    value != null
+        ? secureStorage.setInt(
+            'ff_signedUrlExpirationTime', value.millisecondsSinceEpoch)
+        : secureStorage.remove('ff_signedUrlExpirationTime');
+  }
+
+  void deleteSignedUrlExpirationTime() {
+    secureStorage.delete(key: 'ff_signedUrlExpirationTime');
   }
 }
 

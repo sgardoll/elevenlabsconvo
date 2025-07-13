@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:crypto/crypto.dart';
@@ -11,6 +10,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import '/flutter_flow/flutter_flow_util.dart';
+import '/custom_code/actions/get_signed_url.dart';
 
 enum ConversationState {
   idle,
@@ -59,8 +59,8 @@ class ConversationalAIService {
   // --- END REFACTORED AUDIO COMPONENTS ---
 
   // Configuration
-  String _apiKey = '';
   String _agentId = '';
+  String _endpoint = '';
   String? _conversationId;
 
   // State management
@@ -202,17 +202,46 @@ class ConversationalAIService {
   String get currentAudioSessionId => _currentAudioSessionId;
   ConversationState get currentState => _getCurrentState();
 
+  // Get or refresh signed URL if needed
+  Future<String?> _getSignedUrl() async {
+    // Check if we have a valid cached signed URL
+    if (!FFAppState().isSignedUrlExpired &&
+        FFAppState().cachedSignedUrl.isNotEmpty) {
+      debugPrint('🔐 Using cached signed URL');
+      return FFAppState().cachedSignedUrl;
+    }
+
+    // Fetch new signed URL
+    debugPrint('🔐 Fetching new signed URL');
+    final signedUrl = await getSignedUrl(_agentId, _endpoint);
+
+    if (signedUrl != null) {
+      // Cache the signed URL with 15-minute expiration
+      FFAppState().update(() {
+        FFAppState().cachedSignedUrl = signedUrl;
+        FFAppState().signedUrlExpirationTime =
+            DateTime.now().add(Duration(minutes: 15));
+      });
+      debugPrint('🔐 Signed URL cached successfully');
+      return signedUrl;
+    } else {
+      debugPrint('❌ Failed to obtain signed URL');
+      return null;
+    }
+  }
+
   Future<String> initialize(
-      {required String apiKey, required String agentId}) async {
-    if (_apiKey == apiKey && _agentId == agentId && _isConnected) {
+      {required String agentId, required String endpoint}) async {
+    if (_agentId == agentId && _endpoint == endpoint && _isConnected) {
       debugPrint('🔌 Service already initialized and connected');
       return 'success';
     }
 
-    debugPrint('🔌 Initializing Conversational AI Service v2.0');
+    debugPrint(
+        '🔌 Initializing Conversational AI Service v2.0 with Signed URLs');
     _isDisposing = false; // Reset disposal flag on initialization
-    _apiKey = apiKey;
     _agentId = agentId;
+    _endpoint = endpoint;
 
     _playlist = ConcatenatingAudioSource(children: []);
 
@@ -249,8 +278,8 @@ class ConversationalAIService {
       await _connect();
       FFAppState().update(() {
         FFAppState().wsConnectionState = 'connected';
-        FFAppState().elevenLabsApiKey = apiKey;
         FFAppState().elevenLabsAgentId = agentId;
+        FFAppState().endpoint = endpoint;
       });
       return 'success';
     } catch (e) {
@@ -1076,12 +1105,16 @@ class ConversationalAIService {
     _recordingResumeTimer?.cancel();
 
     try {
-      final uri = Uri.parse(
-          'wss://api.elevenlabs.io/v1/convai/conversation?agent_id=${Uri.encodeComponent(_agentId)}');
+      // Get signed URL for connection
+      final signedUrl = await _getSignedUrl();
+      if (signedUrl == null) {
+        throw Exception('Failed to obtain signed URL');
+      }
+
+      final uri = Uri.parse(signedUrl);
       _channel = IOWebSocketChannel.connect(
         uri,
         headers: {
-          'xi-api-key': _apiKey,
           'User-Agent': 'ElevenLabs-Flutter-Consolidated/2.0',
         },
       );

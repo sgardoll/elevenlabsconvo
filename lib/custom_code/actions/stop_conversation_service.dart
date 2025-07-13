@@ -19,7 +19,6 @@ Future stopConversationService() async {
     FFAppState().update(() {
       FFAppState().wsConnectionState = 'disconnected';
       FFAppState().isRecording = false;
-      FFAppState().elevenLabsApiKey = '';
       FFAppState().elevenLabsAgentId = '';
       FFAppState().conversationMessages = [];
     });
