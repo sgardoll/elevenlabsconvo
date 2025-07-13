@@ -9,18 +9,18 @@ import 'package:flutter/material.dart';
 
 import '/custom_code/conversational_ai_service.dart';
 
-/// Initialize the Consolidated Conversational AI Service Replaces the complex
-/// initializeWebSocket action with a simple service call
+/// Initialize the Consolidated Conversational AI Service using a signed URL
+/// Replaces the complex initializeWebSocket action with a simple service call
 Future<String> initializeConversationService(
   BuildContext context,
-  String apiKey,
-  String agentId,
+  String signedUrl,
 ) async {
   try {
-    debugPrint('🚀 Initializing Consolidated Conversational AI Service');
+    debugPrint(
+        '🚀 Initializing Consolidated Conversational AI Service with signed URL');
 
     final service = ConversationalAIService();
-    final result = await service.initialize(apiKey: apiKey, agentId: agentId);
+    final result = await service.initialize(signedUrl: signedUrl);
 
     debugPrint('🚀 Service initialization result: $result');
     return result;

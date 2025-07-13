@@ -1,3 +1,4 @@
+import '/backend/api_requests/api_calls.dart';
 import '/components/transcription_bubbles_widget.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
@@ -7,38 +8,50 @@ import '/flutter_flow/permissions_util.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
-import 'home_page_model.dart';
-export 'home_page_model.dart';
+import 'elevenlabs_demo_model.dart';
+export 'elevenlabs_demo_model.dart';
 
-class HomePageWidget extends StatefulWidget {
-  const HomePageWidget({super.key});
+class ElevenlabsDemoWidget extends StatefulWidget {
+  const ElevenlabsDemoWidget({super.key});
 
-  static String routeName = 'HomePage';
-  static String routePath = '/homePage';
+  static String routeName = 'Elevenlabs_Demo';
+  static String routePath = '/elevenlabsDemo';
 
   @override
-  State<HomePageWidget> createState() => _HomePageWidgetState();
+  State<ElevenlabsDemoWidget> createState() => _ElevenlabsDemoWidgetState();
 }
 
-class _HomePageWidgetState extends State<HomePageWidget> {
-  late HomePageModel _model;
+class _ElevenlabsDemoWidgetState extends State<ElevenlabsDemoWidget> {
+  late ElevenlabsDemoModel _model;
 
   final scaffoldKey = GlobalKey<ScaffoldState>();
 
   @override
   void initState() {
     super.initState();
-    _model = createModel(context, () => HomePageModel());
+    _model = createModel(context, () => ElevenlabsDemoModel());
 
     // On page load action.
     SchedulerBinding.instance.addPostFrameCallback((_) async {
       await requestPermission(microphonePermission);
       await requestPermission(bluetoothPermission);
+      _model.signedUrlResponse = await GetSignedURLViaBuildShipCall.call(
+        agentId: valueOrDefault<String>(
+          FFLibraryValues().agentId,
+          'agent_01jzmvwhxhf6kaya6n6zbtd0s1',
+        ),
+        endpoint: valueOrDefault<String>(
+          FFLibraryValues().endpoint,
+          'https://515q53.buildship.run/GetSignedUrl',
+        ),
+      );
+
       _model.initializeElevenlabsWebsocket =
           await actions.initializeConversationService(
         context,
-        FFAppState().elevenLabsApiKey,
-        FFAppState().elevenLabsAgentId,
+        GetSignedURLViaBuildShipCall.signedUrl(
+          (_model.signedUrlResponse?.jsonBody ?? ''),
+        )!,
       );
     });
   }

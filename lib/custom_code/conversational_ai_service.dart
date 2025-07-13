@@ -1,9 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'dart:io';
 import 'dart:math' as math;
-import 'package:crypto/crypto.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:record/record.dart';
@@ -59,8 +57,7 @@ class ConversationalAIService {
   // --- END REFACTORED AUDIO COMPONENTS ---
 
   // Configuration
-  String _apiKey = '';
-  String _agentId = '';
+  String _signedUrl = '';
   String? _conversationId;
 
   // State management
@@ -202,17 +199,16 @@ class ConversationalAIService {
   String get currentAudioSessionId => _currentAudioSessionId;
   ConversationState get currentState => _getCurrentState();
 
-  Future<String> initialize(
-      {required String apiKey, required String agentId}) async {
-    if (_apiKey == apiKey && _agentId == agentId && _isConnected) {
+  Future<String> initialize({required String signedUrl}) async {
+    if (_signedUrl == signedUrl && _isConnected) {
       debugPrint('🔌 Service already initialized and connected');
       return 'success';
     }
 
-    debugPrint('🔌 Initializing Conversational AI Service v2.0');
+    debugPrint(
+        '🔌 Initializing Conversational AI Service v2.0 with signed URL');
     _isDisposing = false; // Reset disposal flag on initialization
-    _apiKey = apiKey;
-    _agentId = agentId;
+    _signedUrl = signedUrl;
 
     _playlist = ConcatenatingAudioSource(children: []);
 
@@ -249,8 +245,7 @@ class ConversationalAIService {
       await _connect();
       FFAppState().update(() {
         FFAppState().wsConnectionState = 'connected';
-        FFAppState().elevenLabsApiKey = apiKey;
-        FFAppState().elevenLabsAgentId = agentId;
+        FFAppState().elevenLabsSignedUrl = signedUrl;
       });
       return 'success';
     } catch (e) {
@@ -536,20 +531,12 @@ class ConversationalAIService {
 
   // AUDIO SIGNATURE DETECTION FOR FEEDBACK PREVENTION
   String _generateAudioSignature(Uint8List audioBytes) {
-    // Generate a more robust hash of the audio data for feedback detection
-    try {
-      final digest = sha256.convert(audioBytes);
-      return digest
-          .toString()
-          .substring(0, 16); // Use first 16 chars for efficiency
-    } catch (e) {
-      // Fallback to simple hash if crypto fails
-      int hash = 0;
-      for (int i = 0; i < audioBytes.length; i += 10) {
-        hash = hash ^ audioBytes[i];
-      }
-      return hash.toString();
+    // Generate a simple hash of the audio data for feedback detection
+    int hash = 0;
+    for (int i = 0; i < audioBytes.length; i += 10) {
+      hash = hash ^ audioBytes[i];
     }
+    return hash.toString();
   }
 
   void _cleanOldAudioSignatures() {
@@ -1076,12 +1063,10 @@ class ConversationalAIService {
     _recordingResumeTimer?.cancel();
 
     try {
-      final uri = Uri.parse(
-          'wss://api.elevenlabs.io/v1/convai/conversation?agent_id=${Uri.encodeComponent(_agentId)}');
+      final uri = Uri.parse(_signedUrl);
       _channel = IOWebSocketChannel.connect(
         uri,
         headers: {
-          'xi-api-key': _apiKey,
           'User-Agent': 'ElevenLabs-Flutter-Consolidated/2.0',
         },
       );
@@ -1096,7 +1081,7 @@ class ConversationalAIService {
       _stateController.add(ConversationState.connected);
       _connectionController.add('connected');
       debugPrint(
-          '🔌 Conversational AI Service connected successfully with clean state');
+          '🔌 Conversational AI Service connected successfully with clean state using signed URL');
     } catch (e) {
       debugPrint('❌ Connection error: $e');
       _handleError(e);
