@@ -1,4 +1,3 @@
-import '/backend/api_requests/api_calls.dart';
 import '/components/transcription_bubbles_widget.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
@@ -8,50 +7,39 @@ import '/flutter_flow/permissions_util.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
-import 'elevenlabs_demo_model.dart';
-export 'elevenlabs_demo_model.dart';
+import 'conversational_demo_model.dart';
+export 'conversational_demo_model.dart';
 
-class ElevenlabsDemoWidget extends StatefulWidget {
-  const ElevenlabsDemoWidget({super.key});
+class ConversationalDemoWidget extends StatefulWidget {
+  const ConversationalDemoWidget({super.key});
 
-  static String routeName = 'Elevenlabs_Demo';
-  static String routePath = '/elevenlabsDemo';
+  static String routeName = 'ConversationalDemo';
+  static String routePath = '/conversationalDemo';
 
   @override
-  State<ElevenlabsDemoWidget> createState() => _ElevenlabsDemoWidgetState();
+  State<ConversationalDemoWidget> createState() =>
+      _ConversationalDemoWidgetState();
 }
 
-class _ElevenlabsDemoWidgetState extends State<ElevenlabsDemoWidget> {
-  late ElevenlabsDemoModel _model;
+class _ConversationalDemoWidgetState extends State<ConversationalDemoWidget> {
+  late ConversationalDemoModel _model;
 
   final scaffoldKey = GlobalKey<ScaffoldState>();
 
   @override
   void initState() {
     super.initState();
-    _model = createModel(context, () => ElevenlabsDemoModel());
+    _model = createModel(context, () => ConversationalDemoModel());
 
     // On page load action.
     SchedulerBinding.instance.addPostFrameCallback((_) async {
       await requestPermission(microphonePermission);
       await requestPermission(bluetoothPermission);
-      _model.signedUrlResponse = await GetSignedURLViaBuildShipCall.call(
-        agentId: valueOrDefault<String>(
-          FFLibraryValues().agentId,
-          'agent_01jzmvwhxhf6kaya6n6zbtd0s1',
-        ),
-        endpoint: valueOrDefault<String>(
-          FFLibraryValues().endpoint,
-          'https://515q53.buildship.run/GetSignedUrl',
-        ),
-      );
-
       _model.initializeElevenlabsWebsocket =
           await actions.initializeConversationService(
         context,
-        GetSignedURLViaBuildShipCall.signedUrl(
-          (_model.signedUrlResponse?.jsonBody ?? ''),
-        )!,
+        FFLibraryValues().agentId,
+        FFLibraryValues().endpoint,
       );
     });
   }

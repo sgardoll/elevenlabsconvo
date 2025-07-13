@@ -48,7 +48,7 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
                 ),
               ),
             )
-          : ElevenlabsDemoWidget(),
+          : ConversationalDemoWidget(),
       routes: [
         FFRoute(
           name: '_initialize',
@@ -66,12 +66,12 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
                     ),
                   ),
                 )
-              : ElevenlabsDemoWidget(),
+              : ConversationalDemoWidget(),
         ),
         FFRoute(
-          name: ElevenlabsDemoWidget.routeName,
-          path: ElevenlabsDemoWidget.routePath,
-          builder: (context, params) => ElevenlabsDemoWidget(),
+          name: ConversationalDemoWidget.routeName,
+          path: ConversationalDemoWidget.routePath,
+          builder: (context, params) => ConversationalDemoWidget(),
         )
       ].map((r) => r.toRoute(appStateNotifier)).toList(),
     );

@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 // Begin custom action code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
-import '../conversational_ai_service.dart';
+import '/custom_code/conversational_ai_service.dart';
 
 Future stopConversationService() async {
   try {
@@ -19,7 +19,8 @@ Future stopConversationService() async {
     FFAppState().update(() {
       FFAppState().wsConnectionState = 'disconnected';
       FFAppState().isRecording = false;
-      FFAppState().elevenLabsSignedUrl = '';
+      FFAppState().elevenLabsApiKey = '';
+      FFAppState().elevenLabsAgentId = '';
       FFAppState().conversationMessages = [];
     });
 

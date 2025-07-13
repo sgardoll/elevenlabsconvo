@@ -8,7 +8,7 @@ import 'package:flutter/material.dart';
 // Begin custom widget code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
-import '../conversational_ai_service.dart';
+import '/custom_code/conversational_ai_service.dart';
 import 'dart:async';
 
 class SimpleRecordingButton extends StatefulWidget {

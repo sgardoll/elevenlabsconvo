@@ -20,9 +20,12 @@ class FFAppState extends ChangeNotifier {
   Future initializePersistedState() async {
     secureStorage = FlutterSecureStorage();
     await _safeInitAsync(() async {
-      _elevenLabsSignedUrl =
-          await secureStorage.getString('ff_elevenLabsSignedUrl') ??
-              _elevenLabsSignedUrl;
+      _elevenLabsAgentId =
+          await secureStorage.getString('ff_elevenLabsAgentId') ??
+              _elevenLabsAgentId;
+    });
+    await _safeInitAsync(() async {
+      _endpoint = await secureStorage.getString('ff_endpoint') ?? _endpoint;
     });
   }
 
@@ -74,21 +77,32 @@ class FFAppState extends ChangeNotifier {
     _wsConnectionState = value;
   }
 
+  String _elevenLabsAgentId = '';
+  String get elevenLabsAgentId => _elevenLabsAgentId;
+  set elevenLabsAgentId(String value) {
+    _elevenLabsAgentId = value;
+    secureStorage.setString('ff_elevenLabsAgentId', value);
+  }
+
+  void deleteElevenLabsAgentId() {
+    secureStorage.delete(key: 'ff_elevenLabsAgentId');
+  }
+
   bool _isRecording = false;
   bool get isRecording => _isRecording;
   set isRecording(bool value) {
     _isRecording = value;
   }
 
-  String _elevenLabsSignedUrl = '';
-  String get elevenLabsSignedUrl => _elevenLabsSignedUrl;
-  set elevenLabsSignedUrl(String value) {
-    _elevenLabsSignedUrl = value;
-    secureStorage.setString('ff_elevenLabsSignedUrl', value);
+  String _endpoint = '';
+  String get endpoint => _endpoint;
+  set endpoint(String value) {
+    _endpoint = value;
+    secureStorage.setString('ff_endpoint', value);
   }
 
-  void deleteElevenLabsSignedUrl() {
-    secureStorage.delete(key: 'ff_elevenLabsSignedUrl');
+  void deleteEndpoint() {
+    secureStorage.delete(key: 'ff_endpoint');
   }
 }
 

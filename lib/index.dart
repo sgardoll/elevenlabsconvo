@@ -1,3 +1,3 @@
 // Export pages
-export '/pages/elevenlabs_demo/elevenlabs_demo_widget.dart'
-    show ElevenlabsDemoWidget;
+export '/pages/conversational_demo/conversational_demo_widget.dart'
+    show ConversationalDemoWidget;

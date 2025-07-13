@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
+import 'package:crypto/crypto.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:record/record.dart';
@@ -9,6 +10,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import '/flutter_flow/flutter_flow_util.dart';
+import '/custom_code/actions/get_signed_url.dart';
 
 enum ConversationState {
   idle,
@@ -57,7 +59,8 @@ class ConversationalAIService {
   // --- END REFACTORED AUDIO COMPONENTS ---
 
   // Configuration
-  String _signedUrl = '';
+  String _agentId = '';
+  String _endpoint = '';
   String? _conversationId;
 
   // State management
@@ -199,16 +202,46 @@ class ConversationalAIService {
   String get currentAudioSessionId => _currentAudioSessionId;
   ConversationState get currentState => _getCurrentState();
 
-  Future<String> initialize({required String signedUrl}) async {
-    if (_signedUrl == signedUrl && _isConnected) {
+  // Get or refresh signed URL if needed
+  Future<String?> _getSignedUrl() async {
+    // Check if we have a valid cached signed URL
+    if (!FFAppState().isSignedUrlExpired &&
+        FFAppState().cachedSignedUrl.isNotEmpty) {
+      debugPrint('🔐 Using cached signed URL');
+      return FFAppState().cachedSignedUrl;
+    }
+
+    // Fetch new signed URL
+    debugPrint('🔐 Fetching new signed URL');
+    final signedUrl = await getSignedUrl(_agentId, _endpoint);
+
+    if (signedUrl != null) {
+      // Cache the signed URL with 15-minute expiration
+      FFAppState().update(() {
+        FFAppState().cachedSignedUrl = signedUrl;
+        FFAppState().signedUrlExpirationTime =
+            DateTime.now().add(Duration(minutes: 15));
+      });
+      debugPrint('🔐 Signed URL cached successfully');
+      return signedUrl;
+    } else {
+      debugPrint('❌ Failed to obtain signed URL');
+      return null;
+    }
+  }
+
+  Future<String> initialize(
+      {required String agentId, required String endpoint}) async {
+    if (_agentId == agentId && _endpoint == endpoint && _isConnected) {
       debugPrint('🔌 Service already initialized and connected');
       return 'success';
     }
 
     debugPrint(
-        '🔌 Initializing Conversational AI Service v2.0 with signed URL');
+        '🔌 Initializing Conversational AI Service v2.0 with Signed URLs');
     _isDisposing = false; // Reset disposal flag on initialization
-    _signedUrl = signedUrl;
+    _agentId = agentId;
+    _endpoint = endpoint;
 
     _playlist = ConcatenatingAudioSource(children: []);
 
@@ -245,7 +278,8 @@ class ConversationalAIService {
       await _connect();
       FFAppState().update(() {
         FFAppState().wsConnectionState = 'connected';
-        FFAppState().elevenLabsSignedUrl = signedUrl;
+        FFAppState().elevenLabsAgentId = agentId;
+        FFAppState().endpoint = endpoint;
       });
       return 'success';
     } catch (e) {
@@ -531,12 +565,20 @@ class ConversationalAIService {
 
   // AUDIO SIGNATURE DETECTION FOR FEEDBACK PREVENTION
   String _generateAudioSignature(Uint8List audioBytes) {
-    // Generate a simple hash of the audio data for feedback detection
-    int hash = 0;
-    for (int i = 0; i < audioBytes.length; i += 10) {
-      hash = hash ^ audioBytes[i];
+    // Generate a more robust hash of the audio data for feedback detection
+    try {
+      final digest = sha256.convert(audioBytes);
+      return digest
+          .toString()
+          .substring(0, 16); // Use first 16 chars for efficiency
+    } catch (e) {
+      // Fallback to simple hash if crypto fails
+      int hash = 0;
+      for (int i = 0; i < audioBytes.length; i += 10) {
+        hash = hash ^ audioBytes[i];
+      }
+      return hash.toString();
     }
-    return hash.toString();
   }
 
   void _cleanOldAudioSignatures() {
@@ -1063,7 +1105,13 @@ class ConversationalAIService {
     _recordingResumeTimer?.cancel();
 
     try {
-      final uri = Uri.parse(_signedUrl);
+      // Get signed URL for connection
+      final signedUrl = await _getSignedUrl();
+      if (signedUrl == null) {
+        throw Exception('Failed to obtain signed URL');
+      }
+
+      final uri = Uri.parse(signedUrl);
       _channel = IOWebSocketChannel.connect(
         uri,
         headers: {
@@ -1081,7 +1129,7 @@ class ConversationalAIService {
       _stateController.add(ConversationState.connected);
       _connectionController.add('connected');
       debugPrint(
-          '🔌 Conversational AI Service connected successfully with clean state using signed URL');
+          '🔌 Conversational AI Service connected successfully with clean state');
     } catch (e) {
       debugPrint('❌ Connection error: $e');
       _handleError(e);
