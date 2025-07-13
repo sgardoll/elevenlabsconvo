@@ -7,6 +7,8 @@ import 'package:flutter/material.dart';
 // Begin custom action code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
+import '/backend/api_requests/api_calls.dart';
+
 Future<String?> getSignedUrl(
   String agentId,
   String endpoint,
@@ -15,14 +17,13 @@ Future<String?> getSignedUrl(
     debugPrint('🔐 Fetching signed URL for agent: $agentId');
 
     // Call the endpoint to get signed URL
-    final response = await GetSignedURLViaBuildShipCall.call(
+    final response = await GetSignedURLViaBuildShipCallCall.call(
       agentId: agentId,
       endpoint: endpoint,
     );
 
     if (response.succeeded) {
-      final signedUrl =
-          GetSignedURLViaBuildShipCall.signedUrl(response.jsonBody);
+      final signedUrl = response.jsonBody?['signedUrl']?.toString();
 
       if (signedUrl != null && signedUrl.isNotEmpty) {
         debugPrint('🔐 Successfully obtained signed URL');
