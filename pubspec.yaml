@@ -52,7 +52,7 @@ dependencies:
   http: 1.4.0
   intl: 0.20.2
   json_path: 0.7.2
-  just_audio: ^0.9.35
+  just_audio:
   mime_type: 1.0.0
   page_transition: 2.1.0
   path_provider: 2.1.4
