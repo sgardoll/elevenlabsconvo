@@ -35,10 +35,6 @@ class _ConversationalDemoWidgetState extends State<ConversationalDemoWidget> {
     SchedulerBinding.instance.addPostFrameCallback((_) async {
       await requestPermission(microphonePermission);
       await requestPermission(bluetoothPermission);
-      _model.signedUrlResponse = await actions.getSignedUrl(
-        FFLibraryValues().agentId,
-        FFLibraryValues().endpoint,
-      );
       _model.initConvoAi = await actions.initializeConversationService(
         context,
         FFLibraryValues().agentId,
@@ -107,6 +103,7 @@ class _ConversationalDemoWidgetState extends State<ConversationalDemoWidget> {
                                 'Keyleu_${conversationMessagesIndex.toString()}',
                               ),
                               jsonResponse: conversationMessagesItem,
+                              agentName: 'ElevenLabs Agent',
                               onInitCallback: () async {
                                 await _model.listViewController?.animateTo(
                                   _model.listViewController!.position
