@@ -10,6 +10,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import '/flutter_flow/flutter_flow_util.dart';
+import 'package:lame_encoder/lame_encoder.dart';
 import '/custom_code/actions/index.dart'; // Imports custom actions
 
 enum ConversationState {
@@ -358,17 +359,21 @@ class ConversationalAIService {
       // Clean old signatures (keep only last 10 seconds)
       _cleanOldAudioSignatures();
 
-      final wavBytes = _createWavFile(audioBytes);
-      final tempFile = await _createTempFile(wavBytes);
+      final audioFileBytes = await _createAudioFile(audioBytes);
+      final tempFile = await _createTempFile(audioFileBytes);
 
       _tempFilePaths.add(tempFile.path);
       await _playlist.add(AudioSource.uri(Uri.file(tempFile.path)));
       debugPrint(
-          '🔊 Added audio chunk to playlist. Session: ${_currentAudioSessionId}, Total chunks: ${_playlist.length}');
+          '🔊 Added audio chunk to playlist. Session: ${_currentAudioSessionId}, Total chunks: ${_playlist.length}, Path: ${tempFile.path}');
 
       if (!_player.playing) {
-        _player.play();
-        debugPrint('🔊 Started playlist playback');
+        try {
+          await _player.play();
+          debugPrint('🔊 Started playlist playback');
+        } catch (e) {
+          debugPrint('❌ Error starting playlist playback: $e');
+        }
       }
     } catch (e) {
       debugPrint('❌ Error playing audio: $e');
@@ -1012,48 +1017,61 @@ class ConversationalAIService {
     }
   }
 
-  Uint8List _createWavFile(Uint8List pcmData) {
-    const int sampleRate = 16000;
-    const int bitsPerSample = 16;
-    const int channels = 1;
-    final int dataSize = pcmData.length;
-    final int fileSize = 44 + dataSize;
-    final ByteData wavHeader = ByteData(44);
-    wavHeader.setUint8(0, 0x52); // 'R'
-    wavHeader.setUint8(1, 0x49); // 'I'
-    wavHeader.setUint8(2, 0x46); // 'F'
-    wavHeader.setUint8(3, 0x46); // 'F'
-    wavHeader.setUint32(4, fileSize - 8, Endian.little);
-    wavHeader.setUint8(8, 0x57); // 'W'
-    wavHeader.setUint8(9, 0x41); // 'A'
-    wavHeader.setUint8(10, 0x56); // 'V'
-    wavHeader.setUint8(11, 0x45); // 'E'
-    wavHeader.setUint8(12, 0x66); // 'f'
-    wavHeader.setUint8(13, 0x6d); // 'm'
-    wavHeader.setUint8(14, 0x74); // 't'
-    wavHeader.setUint8(15, 0x20); // ' '
-    wavHeader.setUint32(16, 16, Endian.little);
-    wavHeader.setUint16(20, 1, Endian.little);
-    wavHeader.setUint16(22, channels, Endian.little);
-    wavHeader.setUint32(24, sampleRate, Endian.little);
-    wavHeader.setUint32(
-        28, sampleRate * channels * bitsPerSample ~/ 8, Endian.little);
-    wavHeader.setUint16(32, channels * bitsPerSample ~/ 8, Endian.little);
-    wavHeader.setUint16(34, bitsPerSample, Endian.little);
-    wavHeader.setUint8(36, 0x64); // 'd'
-    wavHeader.setUint8(37, 0x61); // 'a'
-    wavHeader.setUint8(38, 0x74); // 't'
-    wavHeader.setUint8(39, 0x61); // 'a'
-    wavHeader.setUint32(40, dataSize, Endian.little);
-    final Uint8List wavFile = Uint8List(fileSize);
-    wavFile.setRange(0, 44, wavHeader.buffer.asUint8List());
-    wavFile.setRange(44, fileSize, pcmData);
-    return wavFile;
+  Future<Uint8List> _createAudioFile(Uint8List pcmData) async {
+    if (Platform.isIOS) {
+      final lameEncoder = LameEncoder();
+      final mp3Data = await lameEncoder.encode(pcmData);
+      return mp3Data;
+    } else {
+      const int sampleRate = 16000;
+      const int bitsPerSample = 16;
+      const int channels = 1;
+      final int dataSize = pcmData.length;
+      final int fileSize = 44 + dataSize;
+      final ByteData wavHeader = ByteData(44);
+      wavHeader.setUint8(0, 0x52); // 'R'
+      wavHeader.setUint8(1, 0x49); // 'I'
+      wavHeader.setUint8(2, 0x46); // 'F'
+      wavHeader.setUint8(3, 0x46); // 'F'
+      wavHeader.setUint32(4, fileSize - 8, Endian.little);
+      wavHeader.setUint8(8, 0x57); // 'W'
+      wavHeader.setUint8(9, 0x41); // 'A'
+      wavHeader.setUint8(10, 0x56); // 'V'
+      wavHeader.setUint8(11, 0x45); // 'E'
+      wavHeader.setUint8(12, 0x66); // 'f'
+      wavHeader.setUint8(13, 0x6d); // 'm'
+      wavHeader.setUint8(14, 0x74); // 't'
+      wavHeader.setUint8(15, 0x20); // ' '
+      wavHeader.setUint32(16, 16, Endian.little);
+      wavHeader.setUint16(20, 1, Endian.little);
+      wavHeader.setUint16(22, channels, Endian.little);
+      wavHeader.setUint32(24, sampleRate, Endian.little);
+      wavHeader.setUint32(
+          28, sampleRate * channels * bitsPerSample ~/ 8, Endian.little);
+      wavHeader.setUint16(32, channels * bitsPerSample ~/ 8, Endian.little);
+      wavHeader.setUint16(34, bitsPerSample, Endian.little);
+      wavHeader.setUint8(36, 0x64); // 'd'
+      wavHeader.setUint8(37, 0x61); // 'a'
+      wavHeader.setUint8(38, 0x74); // 't'
+      wavHeader.setUint8(39, 0x61); // 'a'
+      wavHeader.setUint32(40, dataSize, Endian.little);
+      final Uint8List wavFile = Uint8List(fileSize);
+      wavFile.setRange(0, 44, wavHeader.buffer.asUint8List());
+      wavFile.setRange(44, fileSize, pcmData);
+      return wavFile;
+    }
   }
 
   Future<File> _createTempFile(Uint8List data) async {
+    if (Platform.isAndroid) {
+      final status = await Permission.storage.request();
+      if (status.isDenied) {
+        throw Exception('Storage permission denied');
+      }
+    }
     final dir = await getTemporaryDirectory();
-    final file = File('${dir.path}/temp_audio_${_tempFileCounter++}.wav');
+    final extension = Platform.isIOS ? 'mp3' : 'wav';
+    final file = File('${dir.path}/temp_audio_${_tempFileCounter++}.$extension');
     await file.writeAsBytes(data);
     return file;
   }
