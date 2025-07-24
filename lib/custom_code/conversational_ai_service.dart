@@ -10,7 +10,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import '/flutter_flow/flutter_flow_util.dart';
-import 'package:lame_encoder/lame_encoder.dart';
+import 'package:dart_lame/dart_lame.dart';
 import '/custom_code/actions/index.dart'; // Imports custom actions
 
 enum ConversationState {
@@ -1019,8 +1019,12 @@ class ConversationalAIService {
 
   Future<Uint8List> _createAudioFile(Uint8List pcmData) async {
     if (Platform.isIOS) {
-      final lameEncoder = LameEncoder();
-      final mp3Data = await lameEncoder.encode(pcmData);
+      final lame = LameEncoder(
+        sampleRate: 16000,
+        bitRate: 128,
+        channels: 1,
+      );
+      final mp3Data = lame.encode(pcmData);
       return mp3Data;
     } else {
       const int sampleRate = 16000;
