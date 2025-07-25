@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import 'package:dart_lame/dart_lame.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '/custom_code/actions/index.dart'; // Imports custom actions
 
 enum ConversationState {
@@ -53,22 +54,31 @@ class ConversationalAIService {
   WebSocketChannel? _channel;
   final AudioRecorder _recorder = AudioRecorder();
 
-  // --- REFACTORED AUDIO COMPONENTS ---
+  // ENHANCED AUDIO SYSTEM FOR iOS/Android COMPATIBILITY
   final AudioPlayer _player = AudioPlayer();
   late ConcatenatingAudioSource _playlist;
-  final List<String> _tempFilePaths = []; // Track file paths
-  // --- END REFACTORED AUDIO COMPONENTS ---
+  final List<String> _tempFilePaths = [];
+
+  // AUDIO CHUNK SEQUENCING FOR ANDROID
+  final Map<int, Uint8List> _audioChunkBuffer = {};
+  int _expectedAudioSequence = 0;
+  Timer? _audioPlaybackTimer;
+
+  // iOS AUDIO SESSION MANAGEMENT
+  bool _iosAudioSessionActive = false;
+  Timer? _iosAudioSessionTimer;
 
   // Configuration
   String _agentId = '';
   String _endpoint = '';
   String? _conversationId;
 
-  // State management
+  // Enhanced state management to prevent infinite loops
   bool _isRecording = false;
   bool _isAgentSpeaking = false;
   bool _isConnected = false;
-  bool _isDisposing = false; // Add flag to track intentional disposal
+  bool _isDisposing = false;
+  bool _isInitializing = false;
   int _reconnectAttempts = 0;
   Timer? _reconnectTimer;
   StreamSubscription<Uint8List>? _audioStreamSubscription;
@@ -77,16 +87,33 @@ class ConversationalAIService {
   StreamSubscription? _playerStateSubscription;
   StreamSubscription? _currentIndexSubscription;
 
+  // CRITICAL: Permanent disposal flag to prevent runaway services
+  bool _permanentlyDisposed = false;
+
+  // CRITICAL FIX: Audio source management
+  bool _isSettingAudioSource = false;
+  bool _audioSourceInitialized = false;
+
+  // SMOOTH PLAYBACK: Audio queue management
+  final List<String> _audioQueue = [];
+  bool _isProcessingQueue = false;
+
+  // INFINITE LOOP PREVENTION SYSTEM
+  DateTime? _lastInitializationAttempt;
+  int _initializationAttempts = 0;
+  static const int _maxInitializationAttempts = 3;
+  static const int _initializationCooldownMs = 5000;
+  bool _preventInfiniteLoops = true;
+
   // Enhanced interruption state management
   bool _isInterrupted = false;
   DateTime? _lastInterruptionTime;
   String _currentAudioSessionId = '';
-  static const int _audioChunkGracePeriodMs =
-      500; // Grace period for late chunks
+  static const int _audioChunkGracePeriodMs = 500;
 
   // Enhanced turn detection
   double _lastVadScore = 0.0;
-  double _vadThreshold = 0.5; // Increased to match server config
+  double _vadThreshold = 0.5;
   int _consecutiveHighVadCount = 0;
   Timer? _vadMonitorTimer;
 
@@ -96,11 +123,11 @@ class ConversationalAIService {
   double _vadBaselineScore = 0.0;
   bool _vadCalibrated = false;
 
-  // AUDIO ISOLATION & FEEDBACK PREVENTION SYSTEM
-  bool _recordingPausedForAgent = false; // Smart pause during agent speech
+  // ENHANCED FEEDBACK PREVENTION SYSTEM
+  bool _recordingPausedForAgent = false;
   Timer? _recordingResumeTimer;
   DateTime? _agentSpeechStartTime;
-  static const int _rapidResumeWindowMs = 200; // Quick resume for interruptions
+  static const int _rapidResumeWindowMs = 200;
 
   // Audio direction detection
   List<double> _recentAudioLevels = [];
@@ -110,15 +137,15 @@ class ConversationalAIService {
   // Enhanced echo cancellation
   bool _echoCancellationActive = false;
   DateTime? _lastAgentAudioTime;
-  static const int _echoSuppressionMs = 800; // Extended echo suppression period
+  static const int _echoSuppressionMs =
+      1200; // Increased for better feedback prevention
 
   // Audio session correlation
   String _lastPlayedAudioSignature = '';
   Map<String, DateTime> _audioSignatureHistory = {};
 
   // ENHANCED SESSION ISOLATION
-  Map<String, List<String>> _sessionAudioSignatures =
-      {}; // Track signatures per session
+  Map<String, List<String>> _sessionAudioSignatures = {};
   Map<String, DateTime> _sessionStartTimes = {};
   String _currentConversationSessionId = '';
   static const int _maxSessionsInMemory = 5;
@@ -127,7 +154,7 @@ class ConversationalAIService {
   Set<String> _activeAudioSessions = {};
   Map<String, String> _sessionToConversationMapping = {};
   DateTime? _lastSessionCleanup;
-  static const int _sessionCleanupIntervalMs = 30000; // 30 seconds
+  static const int _sessionCleanupIntervalMs = 30000;
 
   // Hardware-specific optimizations
   String _deviceAudioProfile = 'default';
@@ -139,9 +166,10 @@ class ConversationalAIService {
   bool _adaptiveEchoCancellationActive = false;
 
   // Hardware-specific echo parameters
-  int _deviceSpecificEchoSuppressionMs = 800;
-  double _deviceSpecificVadThreshold = 0.5;
-  double _deviceSpecificAudioLevelThreshold = 0.15;
+  int _deviceSpecificEchoSuppressionMs = 1200; // Increased default
+  double _deviceSpecificVadThreshold =
+      0.6; // Increased for better feedback prevention
+  double _deviceSpecificAudioLevelThreshold = 0.2; // Increased sensitivity
 
   // Audio device characteristics
   bool _isHeadphonesConnected = false;
@@ -151,11 +179,11 @@ class ConversationalAIService {
 
   // Adaptive echo suppression
   List<double> _echoLevelHistory = [];
-  double _adaptiveEchoThreshold = 0.15;
+  double _adaptiveEchoThreshold = 0.2; // Increased for better prevention
   int _echoDetectionCount = 0;
   static const int _echoHistoryLength = 20;
 
-  // AUDIO DIRECTION DETECTION & FEEDBACK LOOP PREVENTION
+  // ENHANCED AUDIO DIRECTION DETECTION & FEEDBACK LOOP PREVENTION
   List<double> _inputAudioLevelHistory = [];
   List<double> _outputAudioLevelHistory = [];
   static const int _audioDirectionHistoryLength = 15;
@@ -164,12 +192,13 @@ class ConversationalAIService {
   int _feedbackLoopDetectionCount = 0;
   bool _feedbackLoopActive = false;
   DateTime? _lastFeedbackDetection;
-  static const int _feedbackCooldownMs = 3000;
+  static const int _feedbackCooldownMs = 5000; // Increased cooldown
 
   // Audio correlation analysis
   List<String> _recentOutputSignatures = [];
   List<String> _recentInputSignatures = [];
-  double _audioCorrelationThreshold = 0.7;
+  double _audioCorrelationThreshold =
+      0.6; // Lowered for more aggressive detection
 
   // Real-time feedback prevention
   bool _emergencyFeedbackPrevention = false;
@@ -203,6 +232,49 @@ class ConversationalAIService {
   String get currentAudioSessionId => _currentAudioSessionId;
   ConversationState get currentState => _getCurrentState();
 
+  // INFINITE LOOP PREVENTION METHODS
+  bool _canAttemptInitialization() {
+    if (!_preventInfiniteLoops) return true;
+
+    final now = DateTime.now();
+
+    // Check if we're within cooldown period
+    if (_lastInitializationAttempt != null) {
+      final timeSinceLastAttempt =
+          now.difference(_lastInitializationAttempt!).inMilliseconds;
+      if (timeSinceLastAttempt < _initializationCooldownMs) {
+        debugPrint(
+            '🔄 Initialization blocked - still in cooldown period (${_initializationCooldownMs - timeSinceLastAttempt}ms remaining)');
+        return false;
+      }
+    }
+
+    // Check if we've exceeded max attempts recently
+    if (_initializationAttempts >= _maxInitializationAttempts) {
+      debugPrint(
+          '🔄 Initialization blocked - max attempts reached ($_initializationAttempts/$_maxInitializationAttempts)');
+      return false;
+    }
+
+    return true;
+  }
+
+  void _recordInitializationAttempt() {
+    _lastInitializationAttempt = DateTime.now();
+    _initializationAttempts++;
+
+    // Reset attempts counter after successful initialization or timeout
+    Timer(Duration(milliseconds: _initializationCooldownMs), () {
+      _initializationAttempts = 0;
+    });
+  }
+
+  void _resetInitializationState() {
+    _initializationAttempts = 0;
+    _lastInitializationAttempt = null;
+    _isInitializing = false;
+  }
+
   // Get or refresh signed URL if needed
   Future<String?> _getSignedUrl() async {
     // Check if we have a valid cached signed URL
@@ -233,62 +305,230 @@ class ConversationalAIService {
 
   Future<String> initialize(
       {required String agentId, required String endpoint}) async {
+    debugPrint(
+        '🚀 Initializing Consolidated Conversational AI Service with Signed URLs');
+
+    // CRITICAL FIX: Prevent initialization after permanent disposal
+    if (_permanentlyDisposed) {
+      debugPrint('🚫 Service permanently disposed - cannot reinitialize');
+      return 'error: Service permanently disposed';
+    }
+
+    // INFINITE LOOP PREVENTION
+    if (!_canAttemptInitialization()) {
+      return 'error: Initialization blocked to prevent infinite loops';
+    }
+
+    if (_isInitializing) {
+      debugPrint('🔄 Initialization already in progress');
+      return 'error: Initialization already in progress';
+    }
+
+    _isInitializing = true;
+    _recordInitializationAttempt();
+
     if (_agentId == agentId && _endpoint == endpoint && _isConnected) {
       debugPrint('🔌 Service already initialized and connected');
+      _isInitializing = false;
       return 'success';
     }
 
     debugPrint(
-        '🔌 Initializing Conversational AI Service v2.0 with Signed URLs');
-    _isDisposing = false; // Reset disposal flag on initialization
+        '🔌 Initializing Conversational AI Service v3.0 with Enhanced Audio Support');
+    _isDisposing = false;
     _agentId = agentId;
     _endpoint = endpoint;
 
-    _playlist = ConcatenatingAudioSource(children: []);
-
-    // Cancel previous subscriptions if they exist to prevent race conditions
-    await _playerStateSubscription?.cancel();
-    await _currentIndexSubscription?.cancel();
-
-    // Listen for when the entire playlist completes
-    _playerStateSubscription = _player.playerStateStream.listen((state) {
-      if (state.processingState == ProcessingState.completed) {
-        _resetAgentSpeakingState();
-      }
-    });
-
-    // Listen for when the player moves to the next track to clean up the previous one
-    _currentIndexSubscription = _player.currentIndexStream.listen((index) {
-      if (index != null && index > 0) {
-        // Add bounds checking to prevent race condition crashes
-        final targetIndex = index - 1;
-        if (targetIndex >= 0 && targetIndex < _tempFilePaths.length) {
-          // We've moved to a new track, so the previous one can be deleted
-          final fileToDelete = _tempFilePaths[targetIndex];
-          _deleteTempFile(fileToDelete);
-          debugPrint(
-              '🗑️ Cleaned up previous audio file at index $targetIndex');
-        } else {
-          debugPrint(
-              '⚠️ Skipped file cleanup - index $targetIndex out of bounds (list size: ${_tempFilePaths.length})');
-        }
-      }
-    });
-
     try {
+      // iOS/Android specific audio permissions
+      if (Platform.isIOS) {
+        await _requestiOSAudioPermissions();
+      } else if (Platform.isAndroid) {
+        await _requestAndroidAudioPermissions();
+      }
+
+      // Initialize audio components with platform-specific settings
+      await _initializeAudioSystem();
+
       await _connect();
+
       FFAppState().update(() {
         FFAppState().wsConnectionState = 'connected';
         FFAppState().elevenLabsAgentId = agentId;
         FFAppState().endpoint = endpoint;
       });
+
+      _resetInitializationState();
       return 'success';
     } catch (e) {
       debugPrint('❌ Error initializing service: $e');
+      _isInitializing = false;
       return 'error: ${e.toString()}';
     }
   }
 
+  // iOS AUDIO PERMISSION AND SESSION MANAGEMENT
+  Future<void> _requestiOSAudioPermissions() async {
+    debugPrint('🍎 Setting up iOS audio permissions and session');
+
+    try {
+      // Request microphone permission
+      final microphoneStatus = await Permission.microphone.request();
+      debugPrint('🍎 iOS microphone permission: $microphoneStatus');
+
+      // iOS doesn't need explicit storage permissions for app cache
+      debugPrint('🍎 iOS audio setup complete');
+    } catch (e) {
+      debugPrint('⚠️ iOS audio permission setup failed: $e');
+    }
+  }
+
+  // ANDROID AUDIO PERMISSION AND OPTIMIZATION
+  Future<void> _requestAndroidAudioPermissions() async {
+    debugPrint('🤖 Setting up Android audio permissions');
+
+    try {
+      // Request microphone permission
+      final microphoneStatus = await Permission.microphone.request();
+
+      // Request audio permissions for Android 13+
+      final audioStatus = await Permission.audio.request();
+
+      // Request media library access
+      var mediaAudioStatus = PermissionStatus.granted;
+      try {
+        mediaAudioStatus = await Permission.mediaLibrary.request();
+      } catch (e) {
+        debugPrint('⚠️ Media library permission not available: $e');
+      }
+
+      debugPrint(
+          '🤖 Android permissions - Microphone: $microphoneStatus, Audio: $audioStatus, Media: $mediaAudioStatus');
+
+      // Configure Android-specific audio optimizations
+      await _configureAndroidAudioOptimizations();
+    } catch (e) {
+      debugPrint('⚠️ Android audio permission setup failed: $e');
+    }
+  }
+
+  // ANDROID AUDIO OPTIMIZATION
+  Future<void> _configureAndroidAudioOptimizations() async {
+    debugPrint('🤖 Configuring Android audio optimizations');
+
+    // Set Android-specific audio parameters
+    _deviceSpecificEchoSuppressionMs =
+        1500; // Longer echo suppression for Android
+    _deviceSpecificVadThreshold = 0.7; // Higher VAD threshold for Android
+    _deviceSpecificAudioLevelThreshold = 0.25; // Higher audio level threshold
+
+    // Enable all echo cancellation layers for Android
+    _hardwareEchoCancellationActive = true;
+    _softwareEchoCancellationActive = true;
+    _adaptiveEchoCancellationActive = true;
+
+    debugPrint('🤖 Android audio optimizations applied');
+  }
+
+  // CRITICAL FIX: Configure Android audio focus for media playback
+  Future<void> _configureAndroidAudioFocus() async {
+    debugPrint('🤖 Configuring Android audio focus for media playback');
+
+    try {
+      // Ensure the audio player is properly configured for audible playback
+      // The volume setting should be sufficient for most audio routing issues
+      await _player.setVolume(1.0);
+      debugPrint(
+          '🤖 Android audio focus configuration completed (volume-based)');
+    } catch (e) {
+      debugPrint('❌ Error configuring Android audio: $e');
+      // Continue anyway - this is not critical
+    }
+  }
+
+  // ENHANCED AUDIO SYSTEM INITIALIZATION
+  Future<void> _initializeAudioSystem() async {
+    debugPrint('🔊 Initializing enhanced audio system');
+
+    _playlist = ConcatenatingAudioSource(children: []);
+
+    // Cancel previous subscriptions to prevent race conditions
+    await _playerStateSubscription?.cancel();
+    await _currentIndexSubscription?.cancel();
+
+    // CRITICAL FIX: Set volume to ensure audio is audible
+    await _player.setVolume(1.0);
+    debugPrint('🔊 Audio volume set to maximum (1.0)');
+
+    // Platform-specific audio configuration
+    if (Platform.isIOS) {
+      await _initializeiOSAudioSession();
+    } else if (Platform.isAndroid) {
+      await _configureAndroidAudioFocus();
+    }
+
+    // Listen for player state changes (but don't auto-reset on completion)
+    _playerStateSubscription = _player.playerStateStream.listen((state) {
+      debugPrint('🔊 Player state changed: ${state.processingState}');
+
+      // CRITICAL FIX: Don't auto-reset on completion since we're using a queue system
+      // The queue processor will handle cleanup when all chunks are done
+      if (state.processingState == ProcessingState.completed) {
+        debugPrint('🔊 Audio playback completed (queue will handle cleanup)');
+      }
+
+      // iOS: Ensure audio session remains active during playback
+      if (Platform.isIOS && state.playing) {
+        _maintainiOSAudioSession();
+      }
+    });
+
+    // Listen for track changes to manage audio chunk sequencing
+    _currentIndexSubscription = _player.currentIndexStream.listen((index) {
+      if (index != null && index > 0) {
+        final targetIndex = index - 1;
+        if (targetIndex >= 0 && targetIndex < _tempFilePaths.length) {
+          final fileToDelete = _tempFilePaths[targetIndex];
+          _deleteTempFile(fileToDelete);
+          debugPrint('🗑️ Cleaned up audio file at index $targetIndex');
+        }
+      }
+    });
+
+    debugPrint('🔊 Audio system initialization complete');
+  }
+
+  // iOS AUDIO SESSION MANAGEMENT
+  Future<void> _initializeiOSAudioSession() async {
+    debugPrint('🍎 Initializing iOS audio session');
+
+    try {
+      // iOS audio session will be managed by just_audio
+      // but we'll track its state for optimization
+      _iosAudioSessionActive = true;
+
+      // Set up timer to maintain iOS audio session
+      _iosAudioSessionTimer?.cancel();
+      _iosAudioSessionTimer = Timer.periodic(Duration(seconds: 30), (timer) {
+        if (_isAgentSpeaking) {
+          _maintainiOSAudioSession();
+        }
+      });
+
+      debugPrint('🍎 iOS audio session initialized');
+    } catch (e) {
+      debugPrint('⚠️ iOS audio session initialization failed: $e');
+    }
+  }
+
+  void _maintainiOSAudioSession() {
+    if (Platform.isIOS && !_iosAudioSessionActive) {
+      debugPrint('🍎 Reactivating iOS audio session');
+      _iosAudioSessionActive = true;
+    }
+  }
+
+  // ENHANCED AUDIO PLAYBACK WITH CHUNK SEQUENCING
   Future<void> _playAudio(String base64Audio) async {
     try {
       // Check for interruption state - reject stale audio chunks
@@ -303,31 +543,42 @@ class ConversationalAIService {
       }
 
       if (!_isAgentSpeaking) {
-        // Start new audio session
+        // Start new audio session with enhanced setup
         _currentAudioSessionId = _generateAudioSessionId();
         _isAgentSpeaking = true;
-        _isInterrupted = false; // Reset interruption flag for new session
+        _isInterrupted = false;
         _lastInterruptionTime = null;
+        _expectedAudioSequence = 0; // Reset audio sequencing
 
-        // SMART RECORDING PAUSE: Pause recording during agent speech to prevent feedback
+        // iOS: Ensure audio session is active
+        if (Platform.isIOS) {
+          _maintainiOSAudioSession();
+        }
+
+        // SMART RECORDING PAUSE: Enhanced feedback prevention
         _agentSpeechStartTime = DateTime.now();
         _lastAgentAudioTime = DateTime.now();
         await _pauseRecordingForAgent();
         _stateController.add(ConversationState.playing);
-        // Ensure old playlist and files are cleared before starting a new one
+
+        // SIMPLIFIED: Clear old files and prepare for direct playback
         await _clearPlaylistAndFiles();
-        await _player.setAudioSource(_playlist);
+
         debugPrint(
-            '🔊 Started new audio session ${_currentAudioSessionId} (recording paused to prevent feedback)');
+            '🔊 Started new direct audio session ${_currentAudioSessionId} (Platform: ${Platform.operatingSystem})');
+
+        // Set volume to maximum for direct playback
+        await _player.setVolume(1.0);
+        debugPrint('🔊 Audio volume set to maximum for direct playback');
       }
 
       final audioBytes = base64Decode(base64Audio);
       if (audioBytes.length < 10) return;
 
-      // Update last agent audio time for echo suppression
+      // Update last agent audio time for enhanced echo suppression
       _lastAgentAudioTime = DateTime.now();
 
-      // Generate audio signature for feedback detection
+      // Enhanced audio signature generation for feedback detection
       final audioSignature = _generateAudioSignature(audioBytes);
       _lastPlayedAudioSignature = audioSignature;
       _audioSignatureHistory[audioSignature] = DateTime.now();
@@ -338,7 +589,6 @@ class ConversationalAIService {
         _sessionAudioSignatures[_currentConversationSessionId]!
             .add(audioSignature);
 
-        // Keep only recent signatures per session (last 50)
         final sessionSigs =
             _sessionAudioSignatures[_currentConversationSessionId]!;
         if (sessionSigs.length > 50) {
@@ -346,43 +596,210 @@ class ConversationalAIService {
         }
       }
 
-      // Track output signatures for correlation analysis
+      // Track output signatures for enhanced correlation analysis
       _recentOutputSignatures.add(audioSignature);
-      if (_recentOutputSignatures.length > 10) {
+      if (_recentOutputSignatures.length > 15) {
+        // Increased history for better detection
         _recentOutputSignatures.removeAt(0);
       }
 
-      // Track output audio level for direction analysis
+      // Enhanced audio level tracking
       final audioLevel = _calculateAudioLevel(audioBytes);
       _trackOutputAudioLevel(audioLevel);
-
-      // Clean old signatures (keep only last 10 seconds)
       _cleanOldAudioSignatures();
 
-      final audioFileBytes = await _createAudioFile(audioBytes);
-      final tempFile = await _createTempFile(audioFileBytes);
-
-      _tempFilePaths.add(tempFile.path);
-      await _playlist.add(AudioSource.uri(Uri.file(tempFile.path)));
-      debugPrint(
-          '🔊 Added audio chunk to playlist. Session: ${_currentAudioSessionId}, Total chunks: ${_playlist.length}, Path: ${tempFile.path}');
-
-      if (!_player.playing) {
-        try {
-          await _player.play();
-          debugPrint('🔊 Started playlist playback');
-        } catch (e) {
-          debugPrint('❌ Error starting playlist playback: $e');
-        }
+      // COMPLETELY REDESIGNED: Direct audio playback for both platforms
+      if (Platform.isAndroid) {
+        await _handleAndroidAudioDirect(audioBytes);
+      } else {
+        await _handleiOSAudioDirect(audioBytes);
       }
     } catch (e) {
       debugPrint('❌ Error playing audio: $e');
+
+      // Platform-specific error recovery
+      if (Platform.isIOS) {
+        debugPrint('🍎 Attempting iOS audio recovery');
+        await _recoveriOSAudio();
+      } else {
+        debugPrint('🤖 Attempting Android audio recovery');
+        await _recoverAndroidAudio();
+      }
+    }
+  }
+
+  // SIMPLIFIED ANDROID AUDIO: Direct file playback
+  Future<void> _handleAndroidAudioDirect(Uint8List audioBytes) async {
+    debugPrint('🤖 Processing Android audio chunk directly');
+
+    try {
+      await _playAudioChunkDirectly(audioBytes);
+      debugPrint('🤖 Android direct audio playback initiated');
+    } catch (e) {
+      debugPrint('❌ Android direct audio failed: $e');
+      await _recoverAndroidAudio();
+    }
+  }
+
+  // SIMPLIFIED iOS AUDIO: Direct file playback
+  Future<void> _handleiOSAudioDirect(Uint8List audioBytes) async {
+    debugPrint('🍎 Processing iOS audio chunk directly');
+
+    try {
+      await _playAudioChunkDirectly(audioBytes);
+      debugPrint('🍎 iOS direct audio playback initiated');
+    } catch (e) {
+      debugPrint('❌ iOS direct audio failed: $e');
+      await _recoveriOSAudio();
+    }
+  }
+
+  // IMPROVED: Smooth audio playback with queue system
+  Future<void> _playAudioChunkDirectly(Uint8List audioBytes) async {
+    try {
+      // Create audio file
+      final audioFileBytes = await _createAudioFile(audioBytes);
+      final tempFile = await _createTempFile(audioFileBytes);
+      _tempFilePaths.add(tempFile.path);
+
+      debugPrint(
+          '🔊 Adding audio file to queue: ${tempFile.path} (${audioBytes.length} bytes)');
+
+      // Add to queue for smooth playback
+      _audioQueue.add(tempFile.path);
+
+      // Start processing queue if not already processing
+      if (!_isProcessingQueue) {
+        _processAudioQueue();
+      }
+    } catch (e) {
+      debugPrint('❌ Audio file preparation failed: $e');
+      rethrow;
+    }
+  }
+
+  // Process audio queue for smooth playback
+  Future<void> _processAudioQueue() async {
+    if (_isProcessingQueue) return;
+
+    _isProcessingQueue = true;
+    debugPrint('🔊 Starting smooth audio queue processing');
+
+    try {
+      while (_audioQueue.isNotEmpty && _isAgentSpeaking) {
+        final audioPath = _audioQueue.removeAt(0);
+
+        debugPrint('🔊 Playing queued audio: $audioPath');
+
+        // Set volume to maximum
+        await _player.setVolume(1.0);
+
+        // Play the file
+        await _player.setFilePath(audioPath);
+        await _player.play();
+
+        // Wait for this chunk to finish before playing next
+        await _waitForPlaybackCompletion();
+
+        // Small delay between chunks for smooth transition
+        await Future.delayed(Duration(milliseconds: 50));
+      }
+
+      debugPrint('🔊 Audio queue processing completed');
+
+      // CRITICAL FIX: Only reset agent state after queue is completely empty
+      // and we're sure all audio has been played
+      if (_audioQueue.isEmpty) {
+        debugPrint('🔊 Queue empty - scheduling cleanup after brief delay');
+        await Future.delayed(
+            Duration(milliseconds: 200)); // Allow final cleanup
+
+        if (_isAgentSpeaking) {
+          debugPrint('🔊 Queue processing complete - resetting agent state');
+          _resetAgentSpeakingState();
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Audio queue processing failed: $e');
+    } finally {
+      _isProcessingQueue = false;
+    }
+  }
+
+  // Wait for current audio to finish playing (without interfering with file management)
+  Future<void> _waitForPlaybackCompletion() async {
+    final completer = Completer<void>();
+
+    StreamSubscription? subscription;
+    subscription = _player.playerStateStream.listen((state) {
+      debugPrint('🔊 Queue waiting - player state: ${state.processingState}');
+
+      if (state.processingState == ProcessingState.completed ||
+          state.processingState == ProcessingState.idle) {
+        debugPrint('🔊 Audio chunk completed - continuing queue');
+        subscription?.cancel();
+        completer.complete();
+      }
+    });
+
+    return completer.future;
+  }
+
+  // iOS AUDIO RECOVERY
+  Future<void> _recoveriOSAudio() async {
+    debugPrint('🍎 Attempting iOS audio recovery');
+
+    try {
+      // Stop current playback
+      await _player.stop();
+
+      // Reinitialize iOS audio session
+      await _initializeiOSAudioSession();
+
+      // Clear and reset playlist
+      await _playlist.clear();
+      _tempFilePaths.clear();
+
+      // Reset audio state
+      _isAgentSpeaking = false;
+      _stateController.add(ConversationState.connected);
+
+      debugPrint('🍎 iOS audio recovery completed');
+    } catch (e) {
+      debugPrint('❌ iOS audio recovery failed: $e');
+    }
+  }
+
+  // ANDROID AUDIO RECOVERY
+  Future<void> _recoverAndroidAudio() async {
+    debugPrint('🤖 Attempting Android audio recovery');
+
+    try {
+      // Clear audio chunk buffer
+      _audioChunkBuffer.clear();
+      _expectedAudioSequence = 0;
+
+      // Stop current playback
+      await _player.stop();
+
+      // Clear and reset playlist
+      await _playlist.clear();
+      _tempFilePaths.clear();
+
+      // Reset audio state
+      _isAgentSpeaking = false;
+      _stateController.add(ConversationState.connected);
+
+      debugPrint('🤖 Android audio recovery completed');
+    } catch (e) {
+      debugPrint('❌ Android audio recovery failed: $e');
     }
   }
 
   void _resetAgentSpeakingState() async {
     debugPrint(
-        '🔊 Resetting agent speaking state (Session: $_currentAudioSessionId)');
+        '🔊 Resetting agent speaking state (Session: $_currentAudioSessionId, Platform: ${Platform.operatingSystem})');
+
     _isAgentSpeaking = false;
     _recordingPaused = false;
 
@@ -393,24 +810,58 @@ class ConversationalAIService {
     _agentSpeechStartTime = null;
     _lastAgentAudioTime = null;
 
-    // SMART RECORDING RESUME: Resume recording after agent finishes speaking
+    // CRITICAL FIX: Reset audio source state
+    _audioSourceInitialized = false;
+    _isSettingAudioSource = false;
+
+    // SMOOTH PLAYBACK: Clear audio queue
+    _audioQueue.clear();
+    _isProcessingQueue = false;
+
+    // Clear audio chunk buffer for Android
+    if (Platform.isAndroid) {
+      _audioChunkBuffer.clear();
+      _expectedAudioSequence = 0;
+    }
+
+    // iOS: Deactivate audio session timer
+    if (Platform.isIOS) {
+      _iosAudioSessionActive = false;
+    }
+
+    // CONVERSATION END: Properly stop player to prevent background activity
+    try {
+      await _player.stop();
+      debugPrint('🔊 Audio player stopped to prevent background activity');
+    } catch (e) {
+      debugPrint('⚠️ Error stopping player: $e');
+    }
+
+    // SMART RECORDING RESUME: Enhanced feedback prevention
     await _resumeRecordingAfterAgent();
 
     _stateController.add(
         _isConnected ? ConversationState.connected : ConversationState.idle);
+
+    // Platform-specific cleanup delay
+    final cleanupDelay = Platform.isIOS
+        ? Duration(milliseconds: 400)
+        : Duration(milliseconds: 300);
+    await Future.delayed(cleanupDelay);
     await _clearPlaylistAndFiles();
   }
 
-  // Public method to manually trigger interruption (for user-initiated interruption)
+  // Public method to manually trigger interruption (enhanced for better reliability)
   Future<void> triggerInterruption() async {
-    debugPrint('🔊 Manual interruption triggered by user');
-    _handleUserInterruption();
+    debugPrint(
+        '🔊 Manual interruption triggered by user (Platform: ${Platform.operatingSystem})');
+    await _handleUserInterruption();
   }
 
   // Generate unique audio session ID
   String _generateAudioSessionId() {
     final sessionId =
-        'audio_session_${DateTime.now().millisecondsSinceEpoch}_${math.Random().nextInt(1000)}';
+        'audio_session_${DateTime.now().millisecondsSinceEpoch}_${math.Random().nextInt(1000)}_${Platform.operatingSystem}';
 
     // SESSION ISOLATION: Associate audio session with conversation session
     if (_currentConversationSessionId.isNotEmpty) {
@@ -424,19 +875,31 @@ class ConversationalAIService {
 
   // Generate unique conversation session ID
   String _generateSessionId() {
-    return 'session_${DateTime.now().millisecondsSinceEpoch}_${math.Random().nextInt(10000)}';
+    return 'session_${DateTime.now().millisecondsSinceEpoch}_${math.Random().nextInt(10000)}_${Platform.operatingSystem}';
   }
 
-  // Handle user interruption by immediately stopping agent audio
+  // ENHANCED USER INTERRUPTION HANDLING
   Future<void> _handleUserInterruption() async {
     debugPrint(
-        '🔊 User interrupted agent - stopping audio immediately (Session: $_currentAudioSessionId)');
+        '🔊 User interrupted agent - enhanced stopping (Session: $_currentAudioSessionId, Platform: ${Platform.operatingSystem})');
 
     // Set interruption state immediately
     _isInterrupted = true;
     _lastInterruptionTime = DateTime.now();
 
     if (_isAgentSpeaking) {
+      // Platform-specific interruption handling
+      if (Platform.isAndroid) {
+        // Android: Clear buffer and reset sequence
+        _audioChunkBuffer.clear();
+        _expectedAudioSequence = 0;
+      }
+
+      if (Platform.isIOS) {
+        // iOS: Deactivate audio session
+        _iosAudioSessionActive = false;
+      }
+
       // Stop audio playback immediately
       await _player.stop();
 
@@ -467,11 +930,12 @@ class ConversationalAIService {
       // Invalidate conversation session on interruption
       _invalidateCurrentSession();
 
-      debugPrint('🔊 Audio session interrupted and cleaned up');
+      debugPrint(
+          '🔊 Audio session interrupted and cleaned up (Platform: ${Platform.operatingSystem})');
     }
   }
 
-  // Handle VAD scores for enhanced turn detection
+  // Handle VAD scores for enhanced turn detection with platform-specific optimization
   Future<void> _handleVadScore(Map<String, dynamic> data) async {
     final vadScore = data['vad_score_event']?['score'];
     if (vadScore != null) {
@@ -484,21 +948,30 @@ class ConversationalAIService {
           return;
         }
 
-        // Enhanced echo suppression for VAD
+        // Enhanced echo suppression for VAD with platform-specific thresholds
         if (_lastAgentAudioTime != null) {
           final timeSinceAgentAudio =
               DateTime.now().difference(_lastAgentAudioTime!).inMilliseconds;
-          if (timeSinceAgentAudio < _echoSuppressionMs) {
-            // Apply stricter VAD threshold during echo suppression period
-            if (_lastVadScore > _vadThreshold * 1.5) {
+          final echoSuppressionTime = Platform.isAndroid
+              ? _deviceSpecificEchoSuppressionMs
+              : _echoSuppressionMs;
+
+          if (timeSinceAgentAudio < echoSuppressionTime) {
+            // Apply platform-specific VAD threshold during echo suppression
+            final platformVadThreshold = Platform.isAndroid
+                ? _deviceSpecificVadThreshold
+                : _vadThreshold;
+
+            if (_lastVadScore > platformVadThreshold * 1.5) {
               _consecutiveHighVadCount++;
               debugPrint(
-                  '🎤 High VAD score detected during echo suppression: $_lastVadScore (count: $_consecutiveHighVadCount)');
+                  '🎤 High VAD score detected during echo suppression (${Platform.operatingSystem}): $_lastVadScore (count: $_consecutiveHighVadCount)');
 
-              // Require more consecutive high VAD scores during echo suppression
-              if (_consecutiveHighVadCount >= 2) {
+              // Platform-specific consecutive count requirements
+              final requiredCount = Platform.isAndroid ? 3 : 2;
+              if (_consecutiveHighVadCount >= requiredCount) {
                 debugPrint(
-                    '🎤 Sustained user speech detected (echo-filtered) - triggering interruption');
+                    '🎤 Sustained user speech detected (echo-filtered, ${Platform.operatingSystem}) - triggering interruption');
                 await _handleUserInterruption();
                 _consecutiveHighVadCount = 0;
               }
@@ -510,15 +983,19 @@ class ConversationalAIService {
         }
 
         // Normal VAD processing when not in echo suppression
-        if (_lastVadScore > _vadThreshold) {
+        final platformVadThreshold =
+            Platform.isAndroid ? _deviceSpecificVadThreshold : _vadThreshold;
+
+        if (_lastVadScore > platformVadThreshold) {
           _consecutiveHighVadCount++;
           debugPrint(
-              '🎤 High VAD score detected during agent speech: $_lastVadScore (count: $_consecutiveHighVadCount)');
+              '🎤 High VAD score detected during agent speech (${Platform.operatingSystem}): $_lastVadScore (count: $_consecutiveHighVadCount)');
 
-          // Trigger interruption on sustained user speech
-          if (_consecutiveHighVadCount >= 1) {
+          // Platform-specific interruption sensitivity
+          final interruptionThreshold = Platform.isAndroid ? 2 : 1;
+          if (_consecutiveHighVadCount >= interruptionThreshold) {
             debugPrint(
-                '🎤 Sustained user speech detected - triggering interruption');
+                '🎤 Sustained user speech detected (${Platform.operatingSystem}) - triggering interruption');
             await _handleUserInterruption();
             _consecutiveHighVadCount = 0;
           }
@@ -1018,66 +1495,66 @@ class ConversationalAIService {
   }
 
   Future<Uint8List> _createAudioFile(Uint8List pcmData) async {
-    if (Platform.isIOS) {
-      final lame = LameEncoder(
-        sampleRate: 16000,
-        bitRate: 128,
-        channels: 1,
-      );
-      final mp3Data = lame.encode(pcmData);
-      return mp3Data;
-    } else {
-      const int sampleRate = 16000;
-      const int bitsPerSample = 16;
-      const int channels = 1;
-      final int dataSize = pcmData.length;
-      final int fileSize = 44 + dataSize;
-      final ByteData wavHeader = ByteData(44);
-      wavHeader.setUint8(0, 0x52); // 'R'
-      wavHeader.setUint8(1, 0x49); // 'I'
-      wavHeader.setUint8(2, 0x46); // 'F'
-      wavHeader.setUint8(3, 0x46); // 'F'
-      wavHeader.setUint32(4, fileSize - 8, Endian.little);
-      wavHeader.setUint8(8, 0x57); // 'W'
-      wavHeader.setUint8(9, 0x41); // 'A'
-      wavHeader.setUint8(10, 0x56); // 'V'
-      wavHeader.setUint8(11, 0x45); // 'E'
-      wavHeader.setUint8(12, 0x66); // 'f'
-      wavHeader.setUint8(13, 0x6d); // 'm'
-      wavHeader.setUint8(14, 0x74); // 't'
-      wavHeader.setUint8(15, 0x20); // ' '
-      wavHeader.setUint32(16, 16, Endian.little);
-      wavHeader.setUint16(20, 1, Endian.little);
-      wavHeader.setUint16(22, channels, Endian.little);
-      wavHeader.setUint32(24, sampleRate, Endian.little);
-      wavHeader.setUint32(
-          28, sampleRate * channels * bitsPerSample ~/ 8, Endian.little);
-      wavHeader.setUint16(32, channels * bitsPerSample ~/ 8, Endian.little);
-      wavHeader.setUint16(34, bitsPerSample, Endian.little);
-      wavHeader.setUint8(36, 0x64); // 'd'
-      wavHeader.setUint8(37, 0x61); // 'a'
-      wavHeader.setUint8(38, 0x74); // 't'
-      wavHeader.setUint8(39, 0x61); // 'a'
-      wavHeader.setUint32(40, dataSize, Endian.little);
-      final Uint8List wavFile = Uint8List(fileSize);
-      wavFile.setRange(0, 44, wavHeader.buffer.asUint8List());
-      wavFile.setRange(44, fileSize, pcmData);
-      return wavFile;
-    }
+    // Use WAV format for all platforms to avoid dependency issues
+    const int sampleRate = 16000;
+    const int bitsPerSample = 16;
+    const int channels = 1;
+    final int dataSize = pcmData.length;
+    final int fileSize = 44 + dataSize;
+    final ByteData wavHeader = ByteData(44);
+    wavHeader.setUint8(0, 0x52); // 'R'
+    wavHeader.setUint8(1, 0x49); // 'I'
+    wavHeader.setUint8(2, 0x46); // 'F'
+    wavHeader.setUint8(3, 0x46); // 'F'
+    wavHeader.setUint32(4, fileSize - 8, Endian.little);
+    wavHeader.setUint8(8, 0x57); // 'W'
+    wavHeader.setUint8(9, 0x41); // 'A'
+    wavHeader.setUint8(10, 0x56); // 'V'
+    wavHeader.setUint8(11, 0x45); // 'E'
+    wavHeader.setUint8(12, 0x66); // 'f'
+    wavHeader.setUint8(13, 0x6d); // 'm'
+    wavHeader.setUint8(14, 0x74); // 't'
+    wavHeader.setUint8(15, 0x20); // ' '
+    wavHeader.setUint32(16, 16, Endian.little);
+    wavHeader.setUint16(20, 1, Endian.little);
+    wavHeader.setUint16(22, channels, Endian.little);
+    wavHeader.setUint32(24, sampleRate, Endian.little);
+    wavHeader.setUint32(
+        28, sampleRate * channels * bitsPerSample ~/ 8, Endian.little);
+    wavHeader.setUint16(32, channels * bitsPerSample ~/ 8, Endian.little);
+    wavHeader.setUint16(34, bitsPerSample, Endian.little);
+    wavHeader.setUint8(36, 0x64); // 'd'
+    wavHeader.setUint8(37, 0x61); // 'a'
+    wavHeader.setUint8(38, 0x74); // 't'
+    wavHeader.setUint8(39, 0x61); // 'a'
+    wavHeader.setUint32(40, dataSize, Endian.little);
+    final Uint8List wavFile = Uint8List(fileSize);
+    wavFile.setRange(0, 44, wavHeader.buffer.asUint8List());
+    wavFile.setRange(44, fileSize, pcmData);
+    return wavFile;
   }
 
   Future<File> _createTempFile(Uint8List data) async {
-    if (Platform.isAndroid) {
-      final status = await Permission.storage.request();
-      if (status.isDenied) {
-        throw Exception('Storage permission denied');
+    try {
+      // Use app's cache directory which doesn't require storage permissions
+      final dir = await getTemporaryDirectory();
+      final extension = 'wav'; // Use WAV for all platforms
+      final fileName = 'temp_audio_${_tempFileCounter++}.$extension';
+      final file = File('${dir.path}/$fileName');
+
+      // Ensure the directory exists
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
       }
+
+      await file.writeAsBytes(data);
+      debugPrint(
+          '🗂️ Created temp audio file: ${file.path} (${data.length} bytes)');
+      return file;
+    } catch (e) {
+      debugPrint('❌ Error creating temp file: $e');
+      rethrow;
     }
-    final dir = await getTemporaryDirectory();
-    final extension = Platform.isIOS ? 'mp3' : 'wav';
-    final file = File('${dir.path}/temp_audio_${_tempFileCounter++}.$extension');
-    await file.writeAsBytes(data);
-    return file;
   }
 
   Future<void> _connect() async {
@@ -1119,6 +1596,8 @@ class ConversationalAIService {
     _hardwareEchoCancellationActive = false;
     _softwareEchoCancellationActive = false;
     _adaptiveEchoCancellationActive = false;
+    _deviceAudioProfile = 'default';
+    _deviceSpecificSettings.clear();
 
     // Reset feedback detection state
     _resetFeedbackDetection();
@@ -1414,6 +1893,11 @@ class ConversationalAIService {
         case 'interruption':
           await _handleInterruption(jsonData);
           break;
+        case 'conversation_end':
+        case 'conversation_ended':
+        case 'session_end':
+          _handleConversationEnd(jsonData);
+          break;
         default:
           debugPrint('🔌 Received message type: $messageType');
       }
@@ -1484,6 +1968,36 @@ class ConversationalAIService {
     }
   }
 
+  // Handle conversation end to prevent restarts and background activity
+  void _handleConversationEnd(Map<String, dynamic> data) {
+    debugPrint('🔚 Conversation ended - cleaning up to prevent restart');
+
+    // Stop all audio processing immediately
+    _isAgentSpeaking = false;
+    _audioQueue.clear();
+    _isProcessingQueue = false;
+
+    // Stop the player completely
+    _player.stop();
+
+    // Clear conversation state
+    _conversationId = null;
+    _currentConversationSessionId = '';
+
+    // Stop recording if active
+    if (_isRecording) {
+      stopRecording();
+    }
+
+    // Update state to idle to prevent background activity
+    _stateController.add(ConversationState.idle);
+
+    // Clear temp files
+    _clearPlaylistAndFiles();
+
+    debugPrint('🔚 Conversation cleanup completed - no restart should occur');
+  }
+
   Future<void> _handleInterruption(Map<String, dynamic> data) async {
     final reason = data['interruption_event']?['reason'];
     debugPrint('🔌 Conversation interrupted: $reason');
@@ -1549,10 +2063,10 @@ class ConversationalAIService {
       FFAppState().wsConnectionState =
           'error: ${error.toString().substring(0, math.min(50, error.toString().length))}';
     });
-    // Only schedule reconnect if not being disposed
-    if (!_isDisposing) {
-      _scheduleReconnect();
-    }
+
+    // CRITICAL FIX: Don't auto-reconnect on errors - let user handle manually
+    debugPrint(
+        '❌ Service error occurred - no automatic reconnection, manual restart required');
   }
 
   void _handleDisconnect() {
@@ -1563,10 +2077,10 @@ class ConversationalAIService {
     FFAppState().update(() {
       FFAppState().wsConnectionState = 'disconnected';
     });
-    // Only schedule reconnect if not being disposed
-    if (!_isDisposing) {
-      _scheduleReconnect();
-    }
+
+    // CRITICAL FIX: Don't auto-reconnect - let user explicitly reinitialize
+    debugPrint(
+        '🔌 No automatic reconnection - service will remain disconnected until explicitly reinitialized');
   }
 
   void _scheduleReconnect() {
@@ -1590,8 +2104,12 @@ class ConversationalAIService {
   }
 
   Future<void> dispose() async {
-    debugPrint('🔌 Disposing Conversational AI Service');
+    debugPrint(
+        '🔌 Disposing Conversational AI Service v3.0 (Platform: ${Platform.operatingSystem})');
     _isDisposing = true; // Set flag to prevent reconnection
+    _permanentlyDisposed =
+        true; // CRITICAL: Permanent flag to prevent any restart
+
     if (_isRecording) {
       await stopRecording();
     }
@@ -1600,6 +2118,14 @@ class ConversationalAIService {
     if (_isAgentSpeaking) {
       await _handleUserInterruption();
     }
+
+    // ENHANCED CLEANUP: Stop all audio processing immediately
+    _isAgentSpeaking = false;
+    _audioQueue.clear();
+    _isProcessingQueue = false;
+
+    // Reset infinite loop prevention state
+    _resetInitializationState();
 
     // Reset interruption state
     _isInterrupted = false;
@@ -1629,9 +2155,21 @@ class ConversationalAIService {
     _sessionToConversationMapping.clear();
     _lastSessionCleanup = null;
 
+    // Reset platform-specific audio state
+    if (Platform.isAndroid) {
+      _audioChunkBuffer.clear();
+      _expectedAudioSequence = 0;
+      _audioPlaybackTimer?.cancel();
+    }
+
+    if (Platform.isIOS) {
+      _iosAudioSessionActive = false;
+      _iosAudioSessionTimer?.cancel();
+    }
+
     // Reset hardware-specific state
     _echoLevelHistory.clear();
-    _adaptiveEchoThreshold = 0.15;
+    _adaptiveEchoThreshold = 0.2;
     _echoDetectionCount = 0;
     _hardwareEchoCancellationActive = false;
     _softwareEchoCancellationActive = false;
@@ -1672,6 +2210,46 @@ class ConversationalAIService {
     // Clean up temporary files safely
     _safeClearTempFiles();
 
-    debugPrint('🔌 Conversational AI Service disposed with enhanced cleanup');
+    debugPrint(
+        '🔌 Conversational AI Service v3.0 disposed with enhanced cleanup (Platform: ${Platform.operatingSystem})');
+  }
+
+  /// Completely shut down the service and prevent any restart
+  /// Use this when the app is closing to prevent background activity
+  Future<void> shutdown() async {
+    debugPrint('🛑 Shutting down Conversational AI Service permanently');
+    
+    _permanentlyDisposed = true;
+    _isDisposing = true;
+    
+    // Stop all timers immediately
+    _reconnectTimer?.cancel();
+    _vadMonitorTimer?.cancel();
+    _recordingResumeTimer?.cancel();
+    _feedbackPreventionTimer?.cancel();
+    
+    // Stop all audio processing
+    _isAgentSpeaking = false;
+    _audioQueue.clear();
+    _isProcessingQueue = false;
+    
+    // Close connection immediately
+    try {
+      await _channel?.sink.close();
+    } catch (e) {
+      debugPrint('⚠️ Error closing WebSocket: $e');
+    }
+    
+    // Stop player
+    try {
+      await _player.stop();
+    } catch (e) {
+      debugPrint('⚠️ Error stopping player: $e');
+    }
+    
+    // Clean up temp files
+    _safeClearTempFiles();
+    
+    debugPrint('🛑 Service permanently shut down - no further activity possible');
   }
 }

@@ -1,5 +1,3 @@
-
-
 class FFLibraryValues {
   static FFLibraryValues _instance = FFLibraryValues._internal();
 
@@ -13,6 +11,6 @@ class FFLibraryValues {
     _instance = FFLibraryValues._internal();
   }
 
-  late String agentId = '';
-  late String endpoint = '';
+  late String agentId = 'agent_01jzmvwhxhf6kaya6n6zbtd0s1';
+  late String endpoint = 'https://515q53.buildship.run/GetSignedUrl';
 }

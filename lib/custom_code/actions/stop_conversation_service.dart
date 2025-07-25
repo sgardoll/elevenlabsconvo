@@ -11,19 +11,19 @@ import '/custom_code/conversational_ai_service.dart';
 
 Future stopConversationService() async {
   try {
-    // Get the singleton instance and dispose of it
+    // Get the singleton instance and permanently shut it down
     final service = ConversationalAIService();
-    await service.dispose();
+    await service.shutdown(); // Use enhanced shutdown instead of dispose
 
-    // Update FFAppState to reflect disconnected state
+    // Update FFAppState to reflect permanently stopped state
     FFAppState().update(() {
-      FFAppState().wsConnectionState = 'disconnected';
+      FFAppState().wsConnectionState = 'stopped';
       FFAppState().isRecording = false;
       FFAppState().elevenLabsAgentId = '';
       FFAppState().conversationMessages = [];
     });
 
-    debugPrint('🔌 Conversation service stopped and disposed successfully');
+    debugPrint('🛑 Conversation service permanently stopped - no restart possible');
   } catch (e) {
     debugPrint('❌ Error stopping conversation service: $e');
 

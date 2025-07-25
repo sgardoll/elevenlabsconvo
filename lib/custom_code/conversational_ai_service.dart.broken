@@ -1,0 +1,448 @@
+q      return 'success';
+    } catch (e) {
+      debugPrint('❌ Error starting recording: $e');
+      return 'error: ${e.toString()}';
+    }
+  }
+
+  Future<String> stopRecording() async {
+    if (!_isRecording) {
+      debugPrint('⚠️ Not currently recording');
+      return 'error: Not recording';
+    }
+    try {
+      debugPrint('🎙️ Stopping recording...');
+      await _recorder.stop();
+      await _audioStreamSubscription?.cancel();
+      _audioStreamSubscription = null;
+      if (_isConnected) {
+        _channel!.sink.add(jsonEncode({'type': 'user_turn_ended'}));
+        await _sendUserActivity();
+      }
+      _isRecording = false;
+      _recordingController.add(false);
+      _stateController.add(
+          _isConnected ? ConversationState.connected : ConversationState.idle);
+      FFAppState().update(() {
+        FFAppState().isRecording = false;
+      });
+      debugPrint('🎙️ Recording stopped successfully');
+      return 'success';
+    } catch (e) {
+      debugPrint('❌ Error stopping recording: $e');
+      return 'error: ${e.toString()}';
+    }
+  }
+
+  Future<void> _handleAudioChunk(Uint8List audioChunk) async {
+    if (!_isConnected) {
+      return;
+    }
+
+    // Skip processing if recording is paused for agent speech
+    if (_recordingPausedForAgent) {
+      // Still check for strong interruption signals
+      double audioLevel = _calculateAudioLevel(audioChunk);
+      if (audioLevel > 0.4) {
+        debugPrint('🎤 Strong user interruption detected - rapid resume');
+        await _resumeRecordingAfterAgent();
+        await _handleUserInterruption();
+      }
+      return;
+    }
+
+    // Calculate audio level for local monitoring
+    double audioLevel = _calculateAudioLevel(audioChunk);
+
+    // Update audio level history for baseline calculation
+    _recentAudioLevels.add(audioLevel);
+    if (_recentAudioLevels.length > _audioLevelHistoryLength) {
+      _recentAudioLevels.removeAt(0);
+    }
+
+    // Calculate baseline audio level
+    if (_recentAudioLevels.isNotEmpty) {
+      _baselineAudioLevel = _recentAudioLevels.reduce((a, b) => a + b) /
+          _recentAudioLevels.length;
+    }
+
+    // ENHANCED FEEDBACK LOOP DETECTION
+    if (_isAudioFeedback(audioChunk)) {
+      debugPrint('🔇 Audio feedback detected - ignoring chunk');
+      _handleFeedbackDetection();
+      return;
+    }
+
+    // Audio direction analysis
+    _analyzeAudioDirection(audioLevel);
+
+    // Real-time feedback loop prevention
+    if (_emergencyFeedbackPrevention) {
+      debugPrint('🔇 Emergency feedback prevention active - blocking audio');
+      return;
+    }
+
+    // Check for unnatural audio flow patterns
+    if (_detectUnnaturalAudioFlow(audioLevel)) {
+      debugPrint('🔇 Unnatural audio flow detected - suspected feedback loop');
+      _handleFeedbackDetection();
+      return;
+    }
+
+    // MULTI-LAYER ECHO SUPPRESSION
+    if (_lastAgentAudioTime != null) {
+      final timeSinceAgentAudio =
+          DateTime.now().difference(_lastAgentAudioTime!).inMilliseconds;
+
+      // Layer 1: Time-based echo suppression
+      if (timeSinceAgentAudio < _deviceSpecificEchoSuppressionMs) {
+        // Layer 2: Audio level based suppression
+        if (audioLevel < _adaptiveEchoThreshold) {
+          debugPrint(
+              '🔇 Multi-layer echo suppression active - ignoring low-level audio (${audioLevel.toStringAsFixed(3)} < ${_adaptiveEchoThreshold.toStringAsFixed(3)})');
+          return;
+        }
+
+        // Layer 3: Adaptive echo detection
+        if (_isLikelyEcho(audioLevel, timeSinceAgentAudio)) {
+          debugPrint('🔇 Adaptive echo detection - ignoring suspected echo');
+          _echoDetectionCount++;
+          _updateAdaptiveEchoThreshold();
+          return;
+        }
+      }
+    }
+
+    // Enhanced local interruption detection
+    if (_isAgentSpeaking && !_isInterrupted && audioLevel > 0.15) {
+      debugPrint(
+          '🎤 High local audio level detected during agent speech: ${audioLevel.toStringAsFixed(3)}');
+
+      // Trigger immediate interruption on strong local audio signal
+      if (audioLevel > 0.3) {
+        debugPrint(
+            '🎤 Strong user audio detected - triggering immediate interruption');
+        await _handleUserInterruption();
+        return; // Don't send this chunk if we're interrupting
+      }
+    }
+
+    // Send audio chunks to ElevenLabs with enhanced filtering
+    try {
+      final base64Audio = base64Encode(audioChunk);
+      final audioMessage = jsonEncode({'user_audio_chunk': base64Audio});
+      _channel!.sink.add(audioMessage);
+
+      // Log high audio levels during agent speech for debugging
+      if (_isAgentSpeaking && audioLevel > 0.1) {
+        debugPrint(
+            '🎤 User audio level during agent speech: ${audioLevel.toStringAsFixed(3)} (baseline: ${_baselineAudioLevel.toStringAsFixed(3)})');
+      }
+    } catch (e) {
+      debugPrint('❌ Error sending audio chunk: $e');
+    }
+  }
+
+  Future<void> _handleMessage(dynamic message) async {
+    try {
+      final jsonData = jsonDecode(message);
+      final messageType = jsonData['type'] ?? 'unknown';
+      switch (messageType) {
+        case 'conversation_initiation_metadata':
+          _handleConversationInit(jsonData);
+          break;
+        case 'user_transcript':
+          _handleUserTranscript(jsonData);
+          break;
+        case 'agent_response':
+          _handleAgentResponse(jsonData);
+          break;
+        case 'audio':
+          _handleAudioResponse(jsonData);
+          break;
+        case 'vad_score':
+          await _handleVadScore(jsonData);
+          break;
+        case 'interruption':
+          await _handleInterruption(jsonData);
+          break;
+        default:
+          debugPrint('🔌 Received message type: $messageType');
+      }
+    } catch (e) {
+      debugPrint('❌ Error handling message: $e');
+    }
+  }
+
+  void _handleConversationInit(Map<String, dynamic> data) {
+    _conversationId =
+        data['conversation_initiation_metadata_event']?['conversation_id'];
+    debugPrint('🔌 Conversation ID: $_conversationId');
+
+    // ENHANCED SESSION ISOLATION: Initialize new conversation session
+    _currentConversationSessionId = _conversationId ?? _generateSessionId();
+    _sessionStartTimes[_currentConversationSessionId] = DateTime.now();
+    _sessionAudioSignatures[_currentConversationSessionId] = [];
+    _activeAudioSessions.add(_currentConversationSessionId);
+
+    // Clean up old sessions to prevent memory bloat
+    _cleanupOldSessions();
+
+    debugPrint(
+        '🔌 Session isolation initialized for conversation: $_currentConversationSessionId');
+
+    final message = ConversationMessage(
+      type: 'system',
+      content: 'Conversational AI 2.0 session started with enhanced isolation',
+      timestamp: DateTime.now(),
+      conversationId: _conversationId,
+    );
+    _conversationController.add(message);
+    _updateFFAppStateMessages(message);
+  }
+
+  void _handleUserTranscript(Map<String, dynamic> data) {
+    final transcript = data['user_transcription_event']?['user_transcript'];
+    if (transcript != null) {
+      final message = ConversationMessage(
+        type: 'user',
+        content: transcript,
+        timestamp: DateTime.now(),
+      );
+      _conversationController.add(message);
+      _updateFFAppStateMessages(message);
+      debugPrint('👤 User: $transcript');
+    }
+  }
+
+  void _handleAgentResponse(Map<String, dynamic> data) {
+    final response = data['agent_response_event']?['agent_response'];
+    if (response != null) {
+      final message = ConversationMessage(
+        type: 'agent',
+        content: response,
+        timestamp: DateTime.now(),
+      );
+      _conversationController.add(message);
+      _updateFFAppStateMessages(message);
+      debugPrint('🤖 Agent: $response');
+    }
+  }
+
+  void _handleAudioResponse(Map<String, dynamic> data) {
+    final base64Audio = data['audio_event']?['audio_base_64'];
+    if (base64Audio != null && base64Audio.isNotEmpty) {
+      _playAudio(base64Audio);
+    }
+  }
+
+  Future<void> _handleInterruption(Map<String, dynamic> data) async {
+    final reason = data['interruption_event']?['reason'];
+    debugPrint('🔌 Conversation interrupted: $reason');
+
+    // Immediately stop agent audio when user interrupts
+    await _handleUserInterruption();
+
+    final message = ConversationMessage(
+      type: 'system',
+      content: 'Conversation interrupted: $reason',
+      timestamp: DateTime.now(),
+    );
+    _conversationController.add(message);
+    _updateFFAppStateMessages(message);
+  }
+
+  Future<String> sendTextMessage(String text) async {
+    if (!_isConnected) {
+      return 'error: Not connected';
+    }
+    try {
+      final textMessage = jsonEncode({'type': 'user_message', 'text': text});
+      _channel!.sink.add(textMessage);
+      debugPrint('💬 Text message sent: $text');
+      return 'success';
+    } catch (e) {
+      debugPrint('❌ Error sending text message: $e');
+      return 'error: ${e.toString()}';
+    }
+  }
+
+  Future<void> _sendUserActivity() async {
+    if (_isConnected) {
+      try {
+        _channel!.sink.add(jsonEncode({'type': 'user_activity'}));
+      } catch (e) {
+        debugPrint('❌ Error sending user activity: $e');
+      }
+    }
+  }
+
+  void _updateFFAppStateMessages(ConversationMessage message) {
+    FFAppState().update(() {
+      FFAppState().conversationMessages = [
+        ...FFAppState().conversationMessages,
+        message.toJson()
+      ];
+    });
+  }
+
+  ConversationState _getCurrentState() {
+    if (!_isConnected) return ConversationState.idle;
+    if (_isRecording) return ConversationState.recording;
+    if (_isAgentSpeaking) return ConversationState.playing;
+    return ConversationState.connected;
+  }
+
+  void _handleError(dynamic error) {
+    debugPrint('❌ Service error: $error');
+    _stateController.add(ConversationState.error);
+    _connectionController.add('error: ${error.toString()}');
+    FFAppState().update(() {
+      FFAppState().wsConnectionState =
+          'error: ${error.toString().substring(0, math.min(50, error.toString().length))}';
+    });
+    // Only schedule reconnect if not being disposed
+    if (!_isDisposing) {
+      _scheduleReconnect();
+    }
+  }
+
+  void _handleDisconnect() {
+    debugPrint('🔌 Service disconnected');
+    _isConnected = false;
+    _stateController.add(ConversationState.idle);
+    _connectionController.add('disconnected');
+    FFAppState().update(() {
+      FFAppState().wsConnectionState = 'disconnected';
+    });
+    // Only schedule reconnect if not being disposed
+    if (!_isDisposing) {
+      _scheduleReconnect();
+    }
+  }
+
+  void _scheduleReconnect() {
+    if (_reconnectAttempts >= 5) {
+      debugPrint('🔌 Maximum reconnect attempts reached');
+      return;
+    }
+    if (_isDisposing) {
+      debugPrint('🔌 Service is disposing, skipping reconnect');
+      return;
+    }
+    _reconnectTimer?.cancel();
+    final delay = Duration(seconds: math.pow(2, _reconnectAttempts).toInt());
+    _reconnectTimer = Timer(delay, () {
+      // Double-check disposal state before reconnecting
+      if (!_isDisposing) {
+        _connect();
+      }
+    });
+    _reconnectAttempts++;
+  }
+
+  Future<void> dispose() async {
+    debugPrint(
+        '🔌 Disposing Conversational AI Service v3.0 (Platform: ${Platform.operatingSystem})');
+    _isDisposing = true; // Set flag to prevent reconnection
+
+    if (_isRecording) {
+      await stopRecording();
+    }
+
+    // Handle any active audio interruption
+    if (_isAgentSpeaking) {
+      await _handleUserInterruption();
+    }
+
+    // Reset infinite loop prevention state
+    _resetInitializationState();
+
+    // Reset interruption state
+    _isInterrupted = false;
+    _lastInterruptionTime = null;
+    _currentAudioSessionId = '';
+
+    // Reset audio isolation state
+    _recordingPausedForAgent = false;
+    _agentSpeechStartTime = null;
+    _lastAgentAudioTime = null;
+    _echoCancellationActive = false;
+    _recentAudioLevels.clear();
+    _baselineAudioLevel = 0.0;
+    _audioSignatureHistory.clear();
+    _lastPlayedAudioSignature = '';
+
+    // Reset VAD calibration state
+    _vadScoreHistory.clear();
+    _vadBaselineScore = 0.0;
+    _vadCalibrated = false;
+
+    // Reset session isolation state
+    _sessionAudioSignatures.clear();
+    _sessionStartTimes.clear();
+    _currentConversationSessionId = '';
+    _activeAudioSessions.clear();
+    _sessionToConversationMapping.clear();
+    _lastSessionCleanup = null;
+
+    // Reset platform-specific audio state
+    if (Platform.isAndroid) {
+      _audioChunkBuffer.clear();
+      _expectedAudioSequence = 0;
+      _audioPlaybackTimer?.cancel();
+    }
+
+    if (Platform.isIOS) {
+      _iosAudioSessionActive = false;
+      _iosAudioSessionTimer?.cancel();
+    }
+
+    // Reset hardware-specific state
+    _echoLevelHistory.clear();
+    _adaptiveEchoThreshold = 0.2;
+    _echoDetectionCount = 0;
+    _hardwareEchoCancellationActive = false;
+    _softwareEchoCancellationActive = false;
+    _adaptiveEchoCancellationActive = false;
+    _deviceAudioProfile = 'default';
+    _deviceSpecificSettings.clear();
+
+    // Reset feedback detection state
+    _resetFeedbackDetection();
+
+    // Cancel all timers
+    _vadMonitorTimer?.cancel();
+    _recordingResumeTimer?.cancel();
+    _feedbackPreventionTimer?.cancel();
+    _audioStateTimeoutTimer?.cancel();
+
+    // Clean up audio components - cancel subscriptions BEFORE disposing player
+    // to prevent final stream events from triggering race conditions
+    await _playerStateSubscription?.cancel();
+    await _currentIndexSubscription?.cancel();
+    await _player.dispose();
+
+    // Close connection
+    await _channel?.sink.close();
+    await _recorder.dispose();
+    await _audioStreamSubscription?.cancel();
+
+    // Cancel timers
+    _reconnectTimer?.cancel();
+    debugPrint(
+        '🔌 Reconnect timer cancelled, disposal flag set to prevent re-initialization');
+
+    // Close streams
+    await _conversationController.close();
+    await _stateController.close();
+    await _recordingController.close();
+    await _connectionController.close();
+
+    // Clean up temporary files safely
+    _safeClearTempFiles();
+
+    debugPrint(
+        '🔌 Conversational AI Service v3.0 disposed with enhanced cleanup (Platform: ${Platform.operatingSystem})');
+  }
+}
