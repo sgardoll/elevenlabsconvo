@@ -578,9 +578,9 @@ class ConversationalAIService {
         debugPrint(
             '🔊 Started new direct audio session ${_currentAudioSessionId} (Platform: ${Platform.operatingSystem})');
 
-        // Set initial volume - will be ducked by mode listener for interruption
+        // Set volume to maximum for direct playback
         await _player.setVolume(1.0);
-        debugPrint('🔊 Audio volume set for direct playback (may be ducked for interruption)');
+        debugPrint('🔊 Audio volume set to maximum for direct playback');
       }
 
       final audioBytes = base64Decode(base64Audio);
@@ -702,8 +702,8 @@ class ConversationalAIService {
 
         debugPrint('🔊 Playing queued audio: $audioPath');
 
-        // Don't override volume here - let mode listener handle ducking
-        // await _player.setVolume(1.0); // REMOVED - preserves ducking for interruption
+        // Set volume to maximum
+        await _player.setVolume(1.0);
 
         // Play the file
         await _player.setFilePath(audioPath);
@@ -1818,18 +1818,16 @@ class ConversationalAIService {
       return;
     }
 
-    // ENHANCED INTERRUPTION DETECTION: Always process audio for interruptions
-    // Recording stays active during agent speech for immediate interruption detection
-    if (_recordingPausedForAgent && _isAgentSpeaking) {
-      // Check for interruption signals while agent is speaking
+    // Skip processing if recording is paused for agent speech
+    if (_recordingPausedForAgent) {
+      // Still check for strong interruption signals
       double audioLevel = _calculateAudioLevel(audioChunk);
-      if (audioLevel > 0.2) { // Lower threshold for better interruption sensitivity
-        debugPrint('🎤 User interruption detected during agent speech (level: ${audioLevel.toStringAsFixed(3)})');
+      if (audioLevel > 0.4) {
+        debugPrint('🎤 Strong user interruption detected - rapid resume');
         await _resumeRecordingAfterAgent();
         await _handleUserInterruption();
-        return;
       }
-      // Continue processing even during agent speech for better interruption detection
+      return;
     }
 
     // Calculate audio level for local monitoring
