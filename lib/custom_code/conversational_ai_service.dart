@@ -23,6 +23,8 @@ enum ConversationState {
   error
 }
 
+enum AgentMode { listening, speaking, idle }
+
 class ConversationMessage {
   final String type;
   final String content;
@@ -209,6 +211,10 @@ class ConversationalAIService {
   double _inputToOutputRatio = 0.0;
   bool _unnaturalAudioFlow = false;
 
+  // ENHANCED MODE CHANGE SYSTEM FOR ECHO CANCELLATION
+  final _agentModeController = StreamController<AgentMode>.broadcast();
+  StreamSubscription<AgentMode>? _modeSubscription;
+
   // Reactive streams for UI
   final _conversationController =
       StreamController<ConversationMessage>.broadcast();
@@ -222,6 +228,7 @@ class ConversationalAIService {
   Stream<ConversationState> get stateStream => _stateController.stream;
   Stream<bool> get recordingStream => _recordingController.stream;
   Stream<String> get connectionStream => _connectionController.stream;
+  Stream<AgentMode> get agentModeStream => _agentModeController.stream;
 
   // Getters
   bool get isRecording => _isRecording;
@@ -456,6 +463,10 @@ class ConversationalAIService {
     await _playerStateSubscription?.cancel();
     await _currentIndexSubscription?.cancel();
 
+    // ENHANCED MIC GATING: Setup stream-based mode listener
+    _setupEnhancedModeListener();
+    debugPrint('🎤 Enhanced mode listener setup complete');
+
     // CRITICAL FIX: Set volume to ensure audio is audible
     await _player.setVolume(1.0);
     debugPrint('🔊 Audio volume set to maximum (1.0)');
@@ -567,9 +578,9 @@ class ConversationalAIService {
         debugPrint(
             '🔊 Started new direct audio session ${_currentAudioSessionId} (Platform: ${Platform.operatingSystem})');
 
-        // Set volume to maximum for direct playback
+        // Set initial volume - will be ducked by mode listener for interruption
         await _player.setVolume(1.0);
-        debugPrint('🔊 Audio volume set to maximum for direct playback');
+        debugPrint('🔊 Audio volume set for direct playback (may be ducked for interruption)');
       }
 
       final audioBytes = base64Decode(base64Audio);
@@ -691,8 +702,8 @@ class ConversationalAIService {
 
         debugPrint('🔊 Playing queued audio: $audioPath');
 
-        // Set volume to maximum
-        await _player.setVolume(1.0);
+        // Don't override volume here - let mode listener handle ducking
+        // await _player.setVolume(1.0); // REMOVED - preserves ducking for interruption
 
         // Play the file
         await _player.setFilePath(audioPath);
@@ -837,7 +848,12 @@ class ConversationalAIService {
       debugPrint('⚠️ Error stopping player: $e');
     }
 
-    // SMART RECORDING RESUME: Enhanced feedback prevention
+    // ENHANCED MODE CHANGE: Trigger listening mode immediately when agent finishes
+    _agentModeController.add(AgentMode.listening);
+    debugPrint(
+        '🎤 Agent finished - triggering listening mode via enhanced stream');
+
+    // SMART RECORDING RESUME: Enhanced feedback prevention (legacy fallback)
     await _resumeRecordingAfterAgent();
 
     _stateController.add(
@@ -856,6 +872,23 @@ class ConversationalAIService {
     debugPrint(
         '🔊 Manual interruption triggered by user (Platform: ${Platform.operatingSystem})');
     await _handleUserInterruption();
+  }
+
+  // PUBLIC MIC MUTING METHODS FOR FLUTTERFLOW
+  Future<void> pauseMic() async {
+    if (await _recorder.isRecording()) {
+      await _recorder.pause();
+      _agentModeController.add(AgentMode.idle);
+      debugPrint('🔇 Microphone paused via public API');
+    }
+  }
+
+  Future<void> resumeMic() async {
+    if (!await _recorder.isRecording() && _isConnected) {
+      await _recorder.resume();
+      _agentModeController.add(AgentMode.listening);
+      debugPrint('🎤 Microphone resumed via public API');
+    }
   }
 
   // Generate unique audio session ID
@@ -1008,36 +1041,54 @@ class ConversationalAIService {
     }
   }
 
-  // SMART RECORDING PAUSE/RESUME METHODS
+  // ENHANCED MIC GATING WITH STREAM SUBSCRIPTIONS - ALLOWS INTERRUPTION
+  void _setupEnhancedModeListener() {
+    _modeSubscription?.cancel();
+    _modeSubscription = _agentModeController.stream.listen((mode) async {
+      debugPrint('🎤 Mode change detected: ${mode.name}');
+
+      if (mode == AgentMode.speaking) {
+        // DON'T pause recording - keep it active for interruption detection
+        // Only implement soft ducking to reduce feedback while allowing interruption
+        await _player.setVolume(0.25); // reduce playback by 12 dB
+        debugPrint(
+            '🔊 Speaker volume ducked to prevent feedback (recording stays active for interruption)');
+      } else if (mode == AgentMode.listening) {
+        // Restore normal speaker volume
+        await _player.setVolume(1.0);
+        debugPrint('🔊 Speaker volume restored');
+      }
+    });
+  }
+
+  // ENHANCED RECORDING MANAGEMENT - KEEPS RECORDING ACTIVE FOR INTERRUPTION
   Future<void> _pauseRecordingForAgent() async {
     if (_isRecording && !_recordingPausedForAgent) {
       debugPrint(
-          '🔇 Pausing recording during agent speech to prevent feedback');
+          '🔊 Agent started speaking - keeping recording active for interruption detection');
       _recordingPausedForAgent = true;
       _echoCancellationActive = true;
 
-      // Don't actually stop the recording stream, just mark it as paused
-      // This allows for rapid resume when user interrupts
-      _recordingController.add(false);
+      // Trigger enhanced mode change (soft ducking only, no recording pause)
+      _agentModeController.add(AgentMode.speaking);
 
-      // Schedule a check to resume recording if agent speech is too long
+      // Keep recording active - just mark the state for processing logic
+      // _recordingController.add(false); // REMOVED - keep recording active
+
+      // Cancel any existing timer since we don't need timeout for interruption
       _recordingResumeTimer?.cancel();
-      _recordingResumeTimer = Timer(Duration(milliseconds: 5000), () {
-        if (_recordingPausedForAgent && _isAgentSpeaking) {
-          debugPrint(
-              '🔇 Agent speech too long, resuming recording for interruption detection');
-          _resumeRecordingAfterAgent();
-        }
-      });
     }
   }
 
   Future<void> _resumeRecordingAfterAgent() async {
     if (_recordingPausedForAgent) {
-      debugPrint('🔇 Resuming recording after agent speech');
+      debugPrint('🔇 Resuming recording after agent speech (legacy)');
       _recordingPausedForAgent = false;
       _echoCancellationActive = false;
       _recordingResumeTimer?.cancel();
+
+      // Trigger enhanced mode change
+      _agentModeController.add(AgentMode.listening);
 
       if (_isRecording) {
         _recordingController.add(true);
@@ -1710,7 +1761,8 @@ class ConversationalAIService {
           numChannels: 1,
           echoCancel: true,
           noiseSuppress: true,
-          autoGain: true, // Additional audio optimization
+          autoGain: true,
+          // Note: VAD enhancement implemented via audio level analysis in _handleAudioChunk
         ),
       );
       _audioStreamSubscription = recordingStream.listen(
@@ -1766,20 +1818,25 @@ class ConversationalAIService {
       return;
     }
 
-    // Skip processing if recording is paused for agent speech
-    if (_recordingPausedForAgent) {
-      // Still check for strong interruption signals
+    // ENHANCED INTERRUPTION DETECTION: Always process audio for interruptions
+    // Recording stays active during agent speech for immediate interruption detection
+    if (_recordingPausedForAgent && _isAgentSpeaking) {
+      // Check for interruption signals while agent is speaking
       double audioLevel = _calculateAudioLevel(audioChunk);
-      if (audioLevel > 0.4) {
-        debugPrint('🎤 Strong user interruption detected - rapid resume');
+      if (audioLevel > 0.2) { // Lower threshold for better interruption sensitivity
+        debugPrint('🎤 User interruption detected during agent speech (level: ${audioLevel.toStringAsFixed(3)})');
         await _resumeRecordingAfterAgent();
         await _handleUserInterruption();
+        return;
       }
-      return;
+      // Continue processing even during agent speech for better interruption detection
     }
 
     // Calculate audio level for local monitoring
     double audioLevel = _calculateAudioLevel(audioChunk);
+
+    // Note: VAD filtering removed to preserve ElevenLabs' turn detection
+    // The system needs natural audio flow including quiet moments for proper speech ending detection
 
     // Update audio level history for baseline calculation
     _recentAudioLevels.add(audioLevel);
@@ -2132,6 +2189,10 @@ class ConversationalAIService {
     _lastInterruptionTime = null;
     _currentAudioSessionId = '';
 
+    // Clean up enhanced mode stream subscription
+    await _modeSubscription?.cancel();
+    _modeSubscription = null;
+
     // Reset audio isolation state
     _recordingPausedForAgent = false;
     _agentSpeechStartTime = null;
@@ -2206,6 +2267,7 @@ class ConversationalAIService {
     await _stateController.close();
     await _recordingController.close();
     await _connectionController.close();
+    await _agentModeController.close();
 
     // Clean up temporary files safely
     _safeClearTempFiles();
@@ -2218,38 +2280,39 @@ class ConversationalAIService {
   /// Use this when the app is closing to prevent background activity
   Future<void> shutdown() async {
     debugPrint('🛑 Shutting down Conversational AI Service permanently');
-    
+
     _permanentlyDisposed = true;
     _isDisposing = true;
-    
+
     // Stop all timers immediately
     _reconnectTimer?.cancel();
     _vadMonitorTimer?.cancel();
     _recordingResumeTimer?.cancel();
     _feedbackPreventionTimer?.cancel();
-    
+
     // Stop all audio processing
     _isAgentSpeaking = false;
     _audioQueue.clear();
     _isProcessingQueue = false;
-    
+
     // Close connection immediately
     try {
       await _channel?.sink.close();
     } catch (e) {
       debugPrint('⚠️ Error closing WebSocket: $e');
     }
-    
+
     // Stop player
     try {
       await _player.stop();
     } catch (e) {
       debugPrint('⚠️ Error stopping player: $e');
     }
-    
+
     // Clean up temp files
     _safeClearTempFiles();
-    
-    debugPrint('🛑 Service permanently shut down - no further activity possible');
+
+    debugPrint(
+        '🛑 Service permanently shut down - no further activity possible');
   }
 }
