@@ -53,13 +53,6 @@
       <string>audio</string>
     </array>
     <!-- End of UIBackgroundModes -->
-    <!-- Start of NSAllowsArbitraryLoadsTransportSecurity -->
-    <key>NSAppTransportSecurity</key>
-    <dict>
-      <key>NSAllowsArbitraryLoads</key>
-      <true/>
-    </dict>
-    <!-- End of NSAllowsArbitraryLoadsTransportSecurity -->
     <key>UILaunchStoryboardName</key>
     <string>LaunchScreen</string>
     <key>UIMainStoryboardFile</key>
