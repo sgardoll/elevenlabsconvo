@@ -7,35 +7,31 @@ import 'package:flutter/material.dart';
 // Begin custom action code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
+import '../../backend/api_requests/api_calls.dart';
+
 Future<String?> getSignedUrl(
   String agentId,
   String endpoint,
 ) async {
   try {
-    debugPrint('🔐 Fetching signed URL for agent: $agentId');
-
-    // Call the endpoint to get signed URL
-    final response = await GetSignedURLViaBuildShipCallCall.call(
+    final resp = await GetSignedURLViaBuildShipCallCall.call(
       agentId: agentId,
       endpoint: endpoint,
     );
-
-    if (response.succeeded) {
-      final signedUrl = response.jsonBody?['signedUrl']?.toString();
-
-      if (signedUrl != null && signedUrl.isNotEmpty) {
-        debugPrint('🔐 Successfully obtained signed URL');
-        return signedUrl;
-      } else {
-        debugPrint('❌ No signed URL in response');
-        return null;
+    if (resp.succeeded) {
+      final body = (resp.jsonBody ?? {}) as Map<String, dynamic>;
+      final url = body['signedUrl']?.toString();
+      if (url != null && url.startsWith('wss://')) {
+        return url;
       }
+      debugPrint('❌ getSignedUrl: missing/invalid wss url');
+      return null;
     } else {
-      debugPrint('❌ Failed to get signed URL: ${response.statusCode}');
+      debugPrint('❌ getSignedUrl failed: ${resp.statusCode}');
       return null;
     }
   } catch (e) {
-    debugPrint('❌ Error fetching signed URL: $e');
+    debugPrint('❌ getSignedUrl exception: $e');
     return null;
   }
 }

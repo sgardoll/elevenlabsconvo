@@ -1,4 +1,4 @@
-import '/components/transcription_bubbles_widget.dart';
+import '/components/transcription_bubbles/transcription_bubbles_widget.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/custom_code/actions/index.dart' as actions;
@@ -35,10 +35,13 @@ class _ConversationalDemoWidgetState extends State<ConversationalDemoWidget> {
     SchedulerBinding.instance.addPostFrameCallback((_) async {
       await requestPermission(microphonePermission);
       await requestPermission(bluetoothPermission);
-      _model.initConvoAi = await actions.initializeConversationService(
-        context,
-        FFLibraryValues().agentId,
-        FFLibraryValues().endpoint,
+      await actions.initializeConversationService(
+        FFAppState().agentId,
+        FFAppState().endpoint,
+        'I\'m I\'m your ElevenLabs Conversational AI Agent',
+        'en',
+        true,
+        true,
       );
     });
   }
@@ -133,6 +136,7 @@ class _ConversationalDemoWidgetState extends State<ConversationalDemoWidget> {
                     idleColor: FlutterFlowTheme.of(context).primary,
                     iconColor: FlutterFlowTheme.of(context).secondaryBackground,
                     pulseAnimation: true,
+                    keepMicHotDuringAgent: true,
                   ),
                 ),
               ],

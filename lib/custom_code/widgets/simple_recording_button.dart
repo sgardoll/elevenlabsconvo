@@ -8,7 +8,7 @@ import 'package:flutter/material.dart';
 // Begin custom widget code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
-import '/custom_code/conversational_ai_service.dart';
+import '../conversational_ai_service.dart';
 import 'dart:async';
 
 class SimpleRecordingButton extends StatefulWidget {
@@ -23,6 +23,7 @@ class SimpleRecordingButton extends StatefulWidget {
     this.idleColor,
     this.iconColor,
     this.pulseAnimation = true,
+    this.keepMicHotDuringAgent = true,
   }) : super(key: key);
 
   final double? width;
@@ -35,6 +36,9 @@ class SimpleRecordingButton extends StatefulWidget {
   final Color? iconColor;
   final bool pulseAnimation;
 
+  /// Controls whether the mic remains active while the agent is speaking.
+  final bool keepMicHotDuringAgent;
+
   @override
   _SimpleRecordingButtonState createState() => _SimpleRecordingButtonState();
 }
@@ -43,8 +47,8 @@ class _SimpleRecordingButtonState extends State<SimpleRecordingButton>
     with SingleTickerProviderStateMixin {
   late AnimationController _animationController;
   late Animation<double> _scaleAnimation;
+
   final ConversationalAIService _service = ConversationalAIService();
-  StreamSubscription<bool>? _recordingSubscription;
   StreamSubscription<ConversationState>? _stateSubscription;
 
   bool _isRecording = false;
@@ -54,11 +58,11 @@ class _SimpleRecordingButtonState extends State<SimpleRecordingButton>
   void initState() {
     super.initState();
 
-    // Setup pulse animation
+    // Pulse animation
     _animationController = AnimationController(
       vsync: this,
-      duration: Duration(milliseconds: 1000),
-    )..repeat(reverse: true);
+      duration: const Duration(milliseconds: 1000),
+    )..stop();
 
     _scaleAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(
       CurvedAnimation(
@@ -67,89 +71,78 @@ class _SimpleRecordingButtonState extends State<SimpleRecordingButton>
       ),
     );
 
-    _animationController.stop();
-    _setupServiceListeners();
+    _bindServiceState();
   }
 
-  void _setupServiceListeners() {
-    // Listen to recording state
-    _recordingSubscription = _service.recordingStream.listen((isRecording) {
-      if (mounted) {
-        setState(() {
-          _isRecording = isRecording;
-        });
-
-        // Control animation based on recording state with proper checks
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            if (isRecording && widget.pulseAnimation) {
-              if (!_animationController.isAnimating) {
-                _animationController.repeat(reverse: true);
-              }
-            } else {
-              if (_animationController.isAnimating) {
-                _animationController.stop();
-                _animationController.reset();
-              }
-            }
-          }
-        });
-      }
-    });
-
-    // Listen to overall conversation state
+  void _bindServiceState() {
+    // Single source of truth: stateStream
     _stateSubscription = _service.stateStream.listen((state) {
-      if (mounted) {
-        setState(() {
-          _currentState = state;
-        });
-      }
+      if (!mounted) return;
+
+      setState(() {
+        _currentState = state;
+        _isRecording = (state == ConversationState.recording);
+      });
+
+      // Drive pulse animation only when actively recording
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final shouldPulse = _isRecording && widget.pulseAnimation;
+        if (shouldPulse) {
+          if (!_animationController.isAnimating) {
+            _animationController.repeat(reverse: true);
+          }
+        } else {
+          if (_animationController.isAnimating) {
+            _animationController.stop();
+            _animationController.reset();
+          }
+        }
+      });
     });
   }
 
   @override
   void dispose() {
-    _recordingSubscription?.cancel();
     _stateSubscription?.cancel();
-
-    // Ensure animation controller is properly stopped before disposal
     if (_animationController.isAnimating) {
       _animationController.stop();
     }
     _animationController.dispose();
-
     super.dispose();
   }
 
   Future<void> _handleTap() async {
     if (!mounted) return;
 
-    // Allow interruption if agent is speaking - tap to interrupt
+    // Tap-to-interrupt while agent is speaking
     if (_currentState == ConversationState.playing) {
-      debugPrint('🔊 User tapped to interrupt agent speaking');
-      await _service.triggerInterruption();
-      _showSnackBar('Agent interrupted');
+      await _service.interrupt();
+      _showSnackBar('Interrupted');
       return;
     }
 
-    // Prevent interaction if not connected
+    // Not connected yet / error
     if (_currentState == ConversationState.idle ||
+        _currentState == ConversationState.connecting ||
         _currentState == ConversationState.error) {
-      _showSnackBar('Not connected to conversation service');
+      _showSnackBar('Not connected');
       return;
     }
 
-    // Toggle recording using the consolidated service
-    final result = await _service.toggleRecording();
+    // Toggle mic (single button behavior)
+    final res = await _service.toggleMic(
+      keepMicHotDuringAgent: widget.keepMicHotDuringAgent,
+    );
 
-    if (mounted && result.startsWith('error:')) {
-      _showSnackBar('Recording error: ${result.substring(6)}');
+    if (!mounted) return;
+    if (res.startsWith('error:')) {
+      _showSnackBar(res.replaceFirst('error:', '').trim());
     }
   }
 
   void _showSnackBar(String message) {
     if (!mounted) return;
-
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
@@ -158,7 +151,7 @@ class _SimpleRecordingButtonState extends State<SimpleRecordingButton>
             color: FlutterFlowTheme.of(context).primaryText,
           ),
         ),
-        duration: Duration(milliseconds: 2000),
+        duration: const Duration(milliseconds: 1800),
         backgroundColor: FlutterFlowTheme.of(context).secondary,
       ),
     );
@@ -169,14 +162,15 @@ class _SimpleRecordingButtonState extends State<SimpleRecordingButton>
       case ConversationState.recording:
         return widget.recordingColor ?? FlutterFlowTheme.of(context).error;
       case ConversationState.playing:
-        return FlutterFlowTheme.of(context)
-            .secondary; // Changed to secondary for better tap-to-interrupt visibility
+        // Distinct color while agent is speaking so users know they can tap to interrupt
+        return FlutterFlowTheme.of(context).secondary;
       case ConversationState.connected:
         return widget.idleColor ?? FlutterFlowTheme.of(context).primary;
       case ConversationState.connecting:
         return FlutterFlowTheme.of(context).alternate;
       case ConversationState.error:
         return FlutterFlowTheme.of(context).error;
+      case ConversationState.idle:
       default:
         return FlutterFlowTheme.of(context).secondaryText;
     }
@@ -187,12 +181,14 @@ class _SimpleRecordingButtonState extends State<SimpleRecordingButton>
       case ConversationState.recording:
         return Icons.stop;
       case ConversationState.playing:
-        return Icons
-            .pause; // Changed from volume_up to pause to indicate tap-to-interrupt
+        // “Pause” visually implies you can stop/interrupt the agent
+        return Icons.pause;
       case ConversationState.connecting:
         return Icons.sync;
       case ConversationState.error:
         return Icons.error;
+      case ConversationState.connected:
+      case ConversationState.idle:
       default:
         return Icons.mic;
     }
@@ -232,7 +228,6 @@ class _SimpleRecordingButtonState extends State<SimpleRecordingButton>
           child: AnimatedBuilder(
             animation: _scaleAnimation,
             builder: (context, child) {
-              // Only apply scale animation when recording and pulse animation is enabled
               final shouldAnimate = _isRecording && widget.pulseAnimation;
               return Transform.scale(
                 scale: shouldAnimate ? _scaleAnimation.value : 1.0,

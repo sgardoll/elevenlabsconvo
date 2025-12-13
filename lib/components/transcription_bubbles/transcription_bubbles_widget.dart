@@ -68,8 +68,7 @@ class _TranscriptionBubblesWidgetState
           mainAxisSize: MainAxisSize.min,
           children: [
             if (valueOrDefault<bool>(
-              ElevenlabsResponseStruct.maybeFromMap(widget.jsonResponse)
-                      ?.type ==
+              ElevenResponseStruct.maybeFromMap(widget.jsonResponse)?.type ==
                   'agent',
               false,
             ))
@@ -185,8 +184,7 @@ class _TranscriptionBubblesWidgetState
                 ],
               ),
             if (valueOrDefault<bool>(
-              ElevenlabsResponseStruct.maybeFromMap(widget.jsonResponse)
-                      ?.type ==
+              ElevenResponseStruct.maybeFromMap(widget.jsonResponse)?.type ==
                   'user',
               false,
             ))

@@ -7,27 +7,47 @@ import 'package:flutter/material.dart';
 // Begin custom action code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
-import '/custom_code/conversational_ai_service.dart';
+import '../conversational_ai_service.dart';
 
-/// Initialize the Consolidated Conversational AI Service with Signed URLs
-/// Replaces the complex initializeWebSocket action with a secure service call
-Future<String> initializeConversationService(
-  BuildContext context,
+Future<void> initializeConversationService(
   String agentId,
   String endpoint,
+  String? firstMessage,
+  String? language,
+  bool? keepMicHotDuringAgent,
+  bool? autoStartMic,
 ) async {
   try {
-    debugPrint(
-        '🚀 Initializing Consolidated Conversational AI Service with Signed URLs');
+    final svc = ConversationalAIService();
 
-    final service = ConversationalAIService();
-    final result =
-        await service.initialize(agentId: agentId, endpoint: endpoint);
+    final _language = language ?? 'en';
+    final _keepMicHotDuringAgent = keepMicHotDuringAgent ?? true;
+    final _autoStartMic = autoStartMic ?? false;
 
-    debugPrint('🚀 Service initialization result: $result');
-    return result;
+    final res = await svc.initialize(
+      agentId: agentId,
+      endpoint: endpoint,
+      firstMessage: firstMessage,
+      language: _language,
+      keepMicHotDuringAgent: _keepMicHotDuringAgent,
+      autoStartMic: _autoStartMic,
+    );
+
+    if (res == 'success') {
+      FFAppState().update(() {
+        FFAppState().isInConversation =
+            false; // no UI change until user taps mic
+      });
+    } else {
+      FFAppState().update(() {
+        FFAppState().wsConnectionState = res; // e.g. error:no_signed_url
+      });
+    }
   } catch (e) {
-    debugPrint('❌ Error initializing conversation service: $e');
-    return 'error: ${e.toString()}';
+    debugPrint('Error initializing conversation service: $e');
+    FFAppState().update(() {
+      FFAppState().wsConnectionState = 'error:${e.toString()}';
+      FFAppState().isRecording = false;
+    });
   }
 }

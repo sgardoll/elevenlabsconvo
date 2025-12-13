@@ -43,6 +43,9 @@ class FFAppState extends ChangeNotifier {
                   (await secureStorage.getInt('ff_signedUrlExpirationTime'))!)
               : _signedUrlExpirationTime;
     });
+    await _safeInitAsync(() async {
+      _agentId = await secureStorage.getString('ff_agentId') ?? _agentId;
+    });
   }
 
   void update(VoidCallback callback) {
@@ -155,6 +158,53 @@ class FFAppState extends ChangeNotifier {
 
   void deleteSignedUrlExpirationTime() {
     secureStorage.delete(key: 'ff_signedUrlExpirationTime');
+  }
+
+  bool _isInConversation = false;
+  bool get isInConversation => _isInConversation;
+  set isInConversation(bool value) {
+    _isInConversation = value;
+  }
+
+  bool _isAgentSpeaking = false;
+  bool get isAgentSpeaking => _isAgentSpeaking;
+  set isAgentSpeaking(bool value) {
+    _isAgentSpeaking = value;
+  }
+
+  String _lastUserTranscript = '';
+  String get lastUserTranscript => _lastUserTranscript;
+  set lastUserTranscript(String value) {
+    _lastUserTranscript = value;
+  }
+
+  String _lastAgentResponse = '';
+  String get lastAgentResponse => _lastAgentResponse;
+  set lastAgentResponse(String value) {
+    _lastAgentResponse = value;
+  }
+
+  double _lastVadScore = 0.0;
+  double get lastVadScore => _lastVadScore;
+  set lastVadScore(double value) {
+    _lastVadScore = value;
+  }
+
+  String _lastSignedUrl = '';
+  String get lastSignedUrl => _lastSignedUrl;
+  set lastSignedUrl(String value) {
+    _lastSignedUrl = value;
+  }
+
+  String _agentId = '';
+  String get agentId => _agentId;
+  set agentId(String value) {
+    _agentId = value;
+    secureStorage.setString('ff_agentId', value);
+  }
+
+  void deleteAgentId() {
+    secureStorage.delete(key: 'ff_agentId');
   }
 }
 

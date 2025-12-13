@@ -14,7 +14,7 @@ class GetSignedURLViaBuildShipCallCall {
     String? endpoint = '',
   }) async {
     return ApiManager.instance.makeApiCall(
-      callName: 'GetSignedURLViaBuildShipCall ',
+      callName: 'GetSignedURLViaBuildShipCall',
       apiUrl: '${endpoint}',
       callType: ApiCallType.GET,
       headers: {},
