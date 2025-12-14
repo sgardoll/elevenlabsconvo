@@ -7,27 +7,25 @@ import 'package:flutter/material.dart';
 // Begin custom action code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
-import '/custom_code/conversational_ai_service.dart';
+import '/custom_code/elevenlabs_sdk_service.dart';
 
-/// Initialize the Consolidated Conversational AI Service with Signed URLs
-/// Replaces the complex initializeWebSocket action with a secure service call
+/// Initialize the ElevenLabs SDK Conversation Service
+/// Uses the official ElevenLabs Flutter SDK for WebRTC-based conversations
 Future<String> initializeConversationService(
   BuildContext context,
   String agentId,
   String endpoint,
 ) async {
   try {
-    debugPrint(
-        '🚀 Initializing Consolidated Conversational AI Service with Signed URLs');
+    debugPrint('Initializing ElevenLabs SDK Conversation Service');
 
-    final service = ConversationalAIService();
-    final result =
-        await service.initialize(agentId: agentId, endpoint: endpoint);
+    final service = ElevenLabsSdkService();
+    final result = await service.initialize(agentId: agentId, endpoint: endpoint);
 
-    debugPrint('🚀 Service initialization result: $result');
+    debugPrint('Service initialization result: $result');
     return result;
   } catch (e) {
-    debugPrint('❌ Error initializing conversation service: $e');
+    debugPrint('Error initializing conversation service: $e');
     return 'error: ${e.toString()}';
   }
 }

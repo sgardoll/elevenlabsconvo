@@ -14,14 +14,16 @@ class GetSignedURLViaBuildShipCallCall {
     String? endpoint = '',
   }) async {
     return ApiManager.instance.makeApiCall(
-      callName: 'GetSignedURLViaBuildShipCall ',
+      callName: 'GetSignedURLViaBuildShipCall',
       apiUrl: '${endpoint}',
-      callType: ApiCallType.GET,
-      headers: {},
+      callType: ApiCallType.POST,
+      headers: {
+        'Content-Type': 'application/json',
+      },
       params: {
         'agentId': agentId,
-        'endpoint': endpoint,
       },
+      bodyType: BodyType.JSON,
       returnBody: true,
       encodeBodyUtf8: false,
       decodeUtf8: false,

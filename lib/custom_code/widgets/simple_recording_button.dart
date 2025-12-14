@@ -8,7 +8,7 @@ import 'package:flutter/material.dart';
 // Begin custom widget code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
-import '/custom_code/conversational_ai_service.dart';
+import '/custom_code/elevenlabs_sdk_service.dart';
 import 'dart:async';
 
 class SimpleRecordingButton extends StatefulWidget {
@@ -43,7 +43,7 @@ class _SimpleRecordingButtonState extends State<SimpleRecordingButton>
     with SingleTickerProviderStateMixin {
   late AnimationController _animationController;
   late Animation<double> _scaleAnimation;
-  final ConversationalAIService _service = ConversationalAIService();
+  final ElevenLabsSdkService _service = ElevenLabsSdkService();
   StreamSubscription<bool>? _recordingSubscription;
   StreamSubscription<ConversationState>? _stateSubscription;
 

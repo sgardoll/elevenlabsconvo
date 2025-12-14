@@ -53,7 +53,8 @@ dependencies:
   intl: 0.20.2
   json_path: 0.7.2
   just_audio:
-  mime_type: 1.0.0
+  elevenlabs_agents: ^0.3.0
+  mime_type: ^1.0.1
   page_transition: 2.1.0
   path_provider: 2.1.4
   path_provider_android: 2.2.10
