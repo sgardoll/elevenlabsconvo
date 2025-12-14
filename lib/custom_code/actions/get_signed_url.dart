@@ -12,7 +12,7 @@ Future<String?> getSignedUrl(
   String endpoint,
 ) async {
   try {
-    debugPrint('🔐 Fetching signed URL for agent: $agentId');
+    debugPrint('🔐 Fetching signed URL/token for agent: $agentId');
 
     // Call the endpoint to get signed URL
     final response = await GetSignedURLViaBuildShipCallCall.call(
@@ -21,13 +21,19 @@ Future<String?> getSignedUrl(
     );
 
     if (response.succeeded) {
+      // The API returns a JSON object with 'signedUrl' and 'token'.
+      // We prioritize the 'token' for the official SDK.
+      final token = response.jsonBody?['token']?.toString();
       final signedUrl = response.jsonBody?['signedUrl']?.toString();
 
-      if (signedUrl != null && signedUrl.isNotEmpty) {
-        debugPrint('🔐 Successfully obtained signed URL');
+      if (token != null && token.isNotEmpty) {
+        debugPrint('🔐 Successfully obtained conversation token');
+        return token;
+      } else if (signedUrl != null && signedUrl.isNotEmpty) {
+        debugPrint('⚠️ Token not found, falling back to signed URL (might fail with official SDK)');
         return signedUrl;
       } else {
-        debugPrint('❌ No signed URL in response');
+        debugPrint('❌ No token or signed URL in response');
         return null;
       }
     } else {
