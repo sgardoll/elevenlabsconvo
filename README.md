@@ -240,6 +240,17 @@ lib/custom_code/
   -   ✅ Android (API 21+)
   -   ❌ Web (limited audio support for conversational AI)
 
+### iOS Simulator Limitation
+
+The ElevenLabs SDK uses LiveKit's WebRTC implementation, which has known issues capturing microphone input on iOS Simulator.
+
+**Important:** You MUST test on a physical iOS device to verify audio input works. iOS Simulator will always show "..." for transcripts because it cannot capture real microphone input for WebRTC.
+
+For proper testing and development:
+- Use a physical iPhone (iOS 14.0+) for voice conversation features
+- iOS Simulator can be used for UI testing and connection verification
+- Audio capture and transcription require physical device microphone access
+
 -----
 
 ## 🤝 Support & Contributing
