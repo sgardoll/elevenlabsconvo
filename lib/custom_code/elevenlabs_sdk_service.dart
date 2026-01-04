@@ -42,7 +42,8 @@ class ConversationMessage {
 /// ElevenLabs SDK Service Wrapper
 /// Provides a simplified interface to the official ElevenLabs Flutter SDK
 class ElevenLabsSdkService extends ChangeNotifier {
-  static final ElevenLabsSdkService _instance = ElevenLabsSdkService._internal();
+  static final ElevenLabsSdkService _instance =
+      ElevenLabsSdkService._internal();
   factory ElevenLabsSdkService() => _instance;
   ElevenLabsSdkService._internal();
 
@@ -59,19 +60,22 @@ class ElevenLabsSdkService extends ChangeNotifier {
   bool _permissionGranted = false;
 
   // Reactive streams for UI
-  final _conversationController = StreamController<ConversationMessage>.broadcast();
+  final _conversationController =
+      StreamController<ConversationMessage>.broadcast();
   final _stateController = StreamController<ConversationState>.broadcast();
   final _recordingController = StreamController<bool>.broadcast();
   final _connectionController = StreamController<String>.broadcast();
 
   // Public streams
-  Stream<ConversationMessage> get conversationStream => _conversationController.stream;
+  Stream<ConversationMessage> get conversationStream =>
+      _conversationController.stream;
   Stream<ConversationState> get stateStream => _stateController.stream;
   Stream<bool> get recordingStream => _recordingController.stream;
   Stream<String> get connectionStream => _connectionController.stream;
 
   // Getters
-  bool get isRecording => _client?.isMuted == false && _currentState == ConversationState.recording;
+  bool get isRecording =>
+      _client?.isMuted == false && _currentState == ConversationState.recording;
   bool get isAgentSpeaking => _client?.isSpeaking ?? false;
   bool get isConnected => _client?.status == ConversationStatus.connected;
   bool get isDisposing => _isDisposing;
@@ -184,6 +188,12 @@ class ElevenLabsSdkService extends ChangeNotifier {
     required String agentId,
     required String endpoint,
   }) async {
+    // Check if running on iOS simulator
+    if (Platform.isIOS && kDebugMode) {
+      debugPrint('⚠️ WARNING: iOS Simulator does not support microphone input');
+      debugPrint('⚠️ For voice conversations, test on a physical iOS device');
+    }
+
     debugPrint('========================================');
     debugPrint('Initializing ElevenLabs SDK Service');
     debugPrint('  agentId: $agentId');
@@ -218,33 +228,25 @@ class ElevenLabsSdkService extends ChangeNotifier {
       debugPrint('Token obtained (length: ${token.length})');
 
       // Step 3: End any existing session
-      if (_client != null && _client!.status != ConversationStatus.disconnected) {
+      if (_client != null &&
+          _client!.status != ConversationStatus.disconnected) {
         debugPrint('Ending existing session...');
         await _client!.endSession();
         await Future.delayed(const Duration(milliseconds: 500));
       }
 
-      // Step 4: Configure audio output to speaker (iOS/Android)
-      try {
-        if (Platform.isIOS || Platform.isAndroid) {
-          debugPrint('Configuring speaker output...');
-          await livekit.Hardware.instance.setSpeakerphoneOn(true, forceSpeakerOutput: true);
-          debugPrint('Speaker output enabled');
-        }
-      } catch (e) {
-        debugPrint('Warning: Could not configure speaker: $e');
-      }
-
-      // Step 5: Initialize client if needed
+      // Step 4: Initialize client if needed
       _initializeClient();
 
-      // Step 6: Start the session with the token
+      // Step 5: Start session with token and userId
       debugPrint('Starting session with conversationToken...');
+      final userId = 'user-${DateTime.now().millisecondsSinceEpoch}';
       await _client!.startSession(
         conversationToken: token,
+        userId: userId,
       );
 
-      debugPrint('Session started successfully!');
+      debugPrint('Session started successfully for user: $userId');
 
       FFAppState().update(() {
         FFAppState().wsConnectionState = 'connected';
@@ -272,7 +274,8 @@ class ElevenLabsSdkService extends ChangeNotifier {
     final isSpeaking = _client!.isSpeaking;
     final isMuted = _client!.isMuted;
 
-    debugPrint('Client changed: status=$status, isSpeaking=$isSpeaking, isMuted=$isMuted');
+    debugPrint(
+        'Client changed: status=$status, isSpeaking=$isSpeaking, isMuted=$isMuted');
 
     ConversationState newState;
     if (status == ConversationStatus.disconnected) {
@@ -296,7 +299,8 @@ class ElevenLabsSdkService extends ChangeNotifier {
     }
 
     // Update recording stream
-    _recordingController.add(!isMuted && status == ConversationStatus.connected);
+    _recordingController
+        .add(!isMuted && status == ConversationStatus.connected);
 
     notifyListeners();
   }
@@ -381,7 +385,8 @@ class ElevenLabsSdkService extends ChangeNotifier {
     try {
       await _client!.toggleMute();
       final isMuted = _client!.isMuted;
-      debugPrint('Recording ${isMuted ? 'stopped (muted)' : 'started (unmuted)'}');
+      debugPrint(
+          'Recording ${isMuted ? 'stopped (muted)' : 'started (unmuted)'}');
 
       FFAppState().update(() {
         FFAppState().isRecording = !isMuted;
