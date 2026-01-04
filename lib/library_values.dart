@@ -1,5 +1,3 @@
-
-
 class FFLibraryValues {
   static FFLibraryValues _instance = FFLibraryValues._internal();
 
@@ -14,6 +12,6 @@ class FFLibraryValues {
   }
 
   // TODO: Move to environment config before deployment
-  late String agentId = '';
-  late String endpoint = 'https://[YOUR_BACKEND]/eleven-labs-credentials';
+  late String agentId = 'agent_01jzmvwhxhf6kaya6n6zbtd0s1';
+  late String endpoint = 'https://4tgke4.buildship.run/eleven-labs-credentials';
 }
