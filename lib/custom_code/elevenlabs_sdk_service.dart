@@ -453,19 +453,22 @@ class ElevenLabsSdkService extends ChangeNotifier {
   /// This ends the current conversation session completely
   Future<void> triggerInterruption() async {
     debugPrint('Manual interruption triggered - ending conversation session');
-    
+
     // End the session to stop the agent completely
     // This is the only reliable way to stop the agent from speaking
     // and prevent it from responding again
     if (_client != null) {
       try {
+        _client!.removeListener(_onClientChanged);
         await _client!.endSession();
-        debugPrint('Conversation session ended');
-        
+        _client!.dispose();
+        _client = null;
+        debugPrint('Conversation session ended and client disposed');
+
         // Update state
         _updateState(ConversationState.idle);
         _connectionController.add('disconnected');
-        
+
         // Update FFAppState
         FFAppState().update(() {
           FFAppState().wsConnectionState = 'disconnected';

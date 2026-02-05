@@ -124,11 +124,11 @@ class _SimpleRecordingButtonState extends State<SimpleRecordingButton>
   Future<void> _handleTap() async {
     if (!mounted) return;
 
-    // Allow interruption if agent is speaking - tap to interrupt
+    // Allow interruption if agent is speaking - tap to end conversation
     if (_currentState == ConversationState.playing) {
-      debugPrint('🔊 User tapped to interrupt agent speaking');
+      debugPrint('🔊 User tapped to end conversation while agent speaking');
       await _service.triggerInterruption();
-      _showSnackBar('Agent interrupted');
+      _showSnackBar('Conversation ended');
       return;
     }
 
@@ -187,8 +187,7 @@ class _SimpleRecordingButtonState extends State<SimpleRecordingButton>
       case ConversationState.recording:
         return Icons.stop;
       case ConversationState.playing:
-        return Icons
-            .stop; // Stop icon to indicate tap ends conversation
+        return Icons.stop; // Stop icon to indicate tap ends conversation
       case ConversationState.connecting:
         return Icons.sync;
       case ConversationState.error:
