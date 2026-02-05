@@ -54,7 +54,7 @@ None yet.
 
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
-| 001 | Fix agent interruption - stop button keeps agent coming back | 2026-02-06 | [pending] | [001-fix-agent-interruption](./quick/001-fix-agent-interruption/) |
+| 001 | Fix agent interruption - stop button keeps agent coming back | 2026-02-06 | ba82e72 | [001-fix-agent-interruption](./quick/001-fix-agent-interruption/) |
 
 ## Session Continuity
 
