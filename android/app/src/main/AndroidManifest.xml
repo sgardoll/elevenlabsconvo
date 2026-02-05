@@ -1,16 +1,22 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.mycompany.elevenlabsconversationalaiv2" xmlns:tools="http://schemas.android.com/tools">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.mycompany.elevenlabsconversationalailibrary" xmlns:tools="http://schemas.android.com/tools">
   <uses-permission android:name="android.permission.INTERNET"/>
   <uses-permission android:name="android.permission.BLUETOOTH"/>
   <uses-permission android:name="android.permission.RECORD_AUDIO"/>
   <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
   <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+  <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"/>
+  <uses-permission android:name="android.permission.BLUETOOTH_SCAN"/>
+  <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+  <uses-permission android:name="android.permission.CAMERA"/>
   <application
-    android:label="Elevenlabs Conversational AI v2"
+    android:label="Elevenlabs Conversational AI Library"
     tools:replace="android:label"
     android:icon="@mipmap/ic_launcher"
     android:requestLegacyExternalStorage="true"
-    android:enableOnBackInvokedCallback="true"
   >
+    <!-- Start of enableOnBackInvokedCallback -->
+    android:enableOnBackInvokedCallback="true"
+    <!-- End of enableOnBackInvokedCallback -->
     <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop" android:theme="@style/LaunchTheme" android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode" android:hardwareAccelerated="true" android:windowSoftInputMode="adjustResize">
       <!-- Specifies an Android theme to apply to this Activity as soon as
                  the Android process has started. This theme is visible to the user
@@ -33,7 +39,7 @@
         <action android:name="android.intent.action.VIEW"/>
         <category android:name="android.intent.category.DEFAULT"/>
         <category android:name="android.intent.category.BROWSABLE"/>
-        <data android:scheme="elevenlabsconversationalaiv2" android:host="elevenlabsconversationalaiv2.com"/>
+        <data android:scheme="elevenlabsconversationalailibrary" android:host="elevenlabsconversationalailibrary.com"/>
       </intent-filter>
     </activity>
     <!-- Don't delete the meta-data below.

@@ -35,13 +35,10 @@ class _ConversationalDemoWidgetState extends State<ConversationalDemoWidget> {
     SchedulerBinding.instance.addPostFrameCallback((_) async {
       await requestPermission(microphonePermission);
       await requestPermission(bluetoothPermission);
-      await actions.initializeConversationService(
+      _model.initConvoAi = await actions.initializeConversationService(
+        context,
         FFAppState().agentId,
         FFAppState().endpoint,
-        'I\'m I\'m your ElevenLabs Conversational AI Agent',
-        'en',
-        true,
-        true,
       );
     });
   }
@@ -136,7 +133,6 @@ class _ConversationalDemoWidgetState extends State<ConversationalDemoWidget> {
                     idleColor: FlutterFlowTheme.of(context).primary,
                     iconColor: FlutterFlowTheme.of(context).secondaryBackground,
                     pulseAnimation: true,
-                    keepMicHotDuringAgent: true,
                   ),
                 ),
               ],

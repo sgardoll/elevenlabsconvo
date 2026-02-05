@@ -1,4 +1,4 @@
-package com.mycompany.elevenlabsconversationalaiv2
+package com.mycompany.elevenlabsconversationalailibrary
 
 import io.flutter.embedding.android.FlutterActivity
 

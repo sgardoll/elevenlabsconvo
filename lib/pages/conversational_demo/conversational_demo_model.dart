@@ -7,6 +7,8 @@ class ConversationalDemoModel
     extends FlutterFlowModel<ConversationalDemoWidget> {
   ///  State fields for stateful widgets in this page.
 
+  // Stores action output result for [Custom Action - initializeConversationService] action in ConversationalDemo widget.
+  String? initConvoAi;
   // State field(s) for ListView widget.
   ScrollController? listViewController;
   // Models for TranscriptionBubbles dynamic component.
