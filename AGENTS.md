@@ -1,135 +1,111 @@
-# AGENTS.md - FlutterFlow ElevenLabs Conversational AI
+# ElevenLabs Conversational AI v2
 
-## Build, Lint, Test Commands
+**Generated:** 2026-02-05
+**Commit:** 1a09836
+**Branch:** sdkRedeploy
 
-### Build
-```bash
-flutter build apk      # Android APK
-flutter build ios      # iOS (requires macOS)
-flutter build web      # Web
-flutter build macos    # macOS (requires macOS)
-flutter build windows  # Windows
-flutter build linux    # Linux
+## Overview
+FlutterFlow project implementing ElevenLabs Conversational AI v2 using the official `elevenlabs_agents` SDK. Features real-time voice conversations via WebRTC, secure token-based authentication, and FlutterFlow-native integration.
+
+## Structure
+
+```
+lib/
+├── flutter_flow/          # FlutterFlow framework utilities (9 files)
+├── custom_code/           # ElevenLabs SDK integration (7 files)
+│   ├── elevenlabs_sdk_service.dart    # Core WebRTC service
+│   ├── actions/                       # Custom actions (init, stop, get token)
+│   └── widgets/                       # Custom widgets (recording button)
+├── backend/               # API requests & schema structs
+├── pages/                 # Page widgets (conversational_demo)
+└── components/            # UI components (transcription bubbles)
 ```
 
-### Test
+## Where to Look
+
+| Task | Location | Notes |
+|------|----------|-------|
+| Initialize conversation | `lib/custom_code/actions/initialize_conversation_service.dart` | Main entry point |
+| Core SDK service | `lib/custom_code/elevenlabs_sdk_service.dart` | WebRTC, state management |
+| Recording UI | `lib/custom_code/widgets/simple_recording_button.dart` | Visual feedback |
+| App state | `lib/app_state.dart` | FFAppState singleton |
+| Theme | `lib/flutter_flow/flutter_flow_theme.dart` | FlutterFlow colors |
+| API calls | `lib/backend/api_requests/` | Token endpoint calls |
+
+## Commands
+
 ```bash
-flutter test                    # Run all tests
-flutter test test/widget_test.dart  # Run specific test file
-flutter test --plain-name "Counter increments"  # Run single test by name
-flutter test --coverage         # Run with coverage
+flutter pub get                 # Install deps (includes elevenlabs_agents)
+flutter analyze                 # Static analysis (custom_code excluded)
+flutter test                    # Run tests
+dart format lib/                # Format code
+flutter build apk/ios/web       # Platform builds
 ```
 
-### Lint & Format
-```bash
-flutter analyze                 # Run static analysis
-dart format .                   # Format all Dart files
-dart format lib/ --set-exit-if-changed  # Format and exit with error if changes
-```
-
-### Dependencies
-```bash
-flutter pub get                 # Install dependencies
-flutter pub upgrade             # Upgrade dependencies
-flutter clean                   # Clean build artifacts
-```
-
----
-
-## Code Style Guidelines
+## Conventions
 
 ### Imports
-- Use absolute imports with `package:` for external dependencies
-- Use relative imports with `/` prefix for project files (e.g., `/flutter_flow/flutter_flow_util.dart`)
-- Order: FlutterFlow automatic imports → custom code → SDK imports
-- Custom widgets/actions must start with automatic FlutterFlow block:
-  ```dart
-  // Automatic FlutterFlow imports
-  import '/backend/schema/structs/index.dart';
-  import '/flutter_flow/flutter_flow_theme.dart';
-  import '/flutter_flow/flutter_flow_util.dart';
-  import 'index.dart';
-  import '/custom_code/actions/index.dart';
-  import 'package:flutter/material.dart';
-  // Begin custom widget code
-  // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
-  ```
-
-### Formatting
-- 2-space indentation
-- No trailing whitespace
-- Line length: 80-100 characters (be consistent with surrounding code)
-- Minimal comments - code should be self-documenting
-
-### Types & Null Safety
-- Dart 3.0.0+ with full null safety
-- Explicit types for class members: `String`, `bool`, `List<T>`, etc.
-- Use `late` for deferred initialization when needed
-- Use `final` for immutable variables, `var` for local when type is obvious
-- Nullable types with `?` suffix: `String?`, `DateTime?`
-
-### Naming Conventions
-- Variables/methods: `camelCase`
-- Classes/types: `PascalCase`
-- Files/directories: `snake_case`
-- Private members: prefix with `_`
-- Constants: `lowerCamelCase` or `UPPER_SNAKE_CASE` for global constants
-
-### Patterns & Architecture
-- Singleton pattern for services:
-  ```dart
-  class FFAppState extends ChangeNotifier {
-    static FFAppState _instance = FFAppState._internal();
-    factory FFAppState() => _instance;
-    FFAppState._internal();
-  }
-  ```
-- State management: Provider with `ChangeNotifier`, FFAppState singleton
-- Async: Use `Future<T>` returns, `async/await`, wrap with `try-catch`
-- Error handling: Return error strings prefixed with `'error: '`
-- State updates: Always use `safeSetState(() { ... })` which checks `mounted`
-- Disposal: Cancel stream subscriptions and dispose controllers in `dispose()`
-- Platform checks: `kIsWeb`, `Platform.isAndroid`, `Platform.isiOS`
-
-### FlutterFlow Specifics
-- `lib/custom_code/**` and `lib/flutter_flow/custom_functions.dart` are excluded from analysis
-- Model file pattern: `*_widget.dart` + `*_model.dart`
-- Use `wrapWithModel()` for widget models
-- App State integration: `FFAppState()` singleton for global state
-- Theme integration: `FlutterFlowTheme.of(context)` for theme colors
-
-### Key Utilities
-- `safeSetState()`: Wrapper that checks `mounted` before calling `setState()`
-- `valueOrDefault<T>(value, defaultValue)`: Safe null coalescing
-- `dateTimeFormat()`: Format DateTime with locale support
-- `showSnackbar()`: Display snackbar with optional loading state
-- `debugPrint()`: For logging (preferred over `print()`)
-
-### Stream & Subscription Management
-- Always assign stream subscriptions to fields: `StreamSubscription<T>? _subscription`
-- Cancel subscriptions in `dispose()`: `_subscription?.cancel()`
-- Check `mounted` before `setState()` in stream callbacks
-- Use `if (mounted) setState(...)` pattern
-
-### Platform Permissions
-- Use `requestPermission(microphonePermission)` before initialization
-- Android: Add permissions to `AndroidManifest.xml`
-- iOS: Add permissions to `Info.plist` (NSMicrophoneUsageDescription, UIBackgroundModes)
-
-### Error Handling Pattern
 ```dart
-try {
-  final result = await someAsyncOperation();
-  debugPrint('Operation result: $result');
-  return result;
-} catch (e) {
-  debugPrint('Error: $e');
-  return 'error: ${e.toString()}';
+// Automatic FlutterFlow imports (REQUIRED for custom code)
+import '/backend/schema/structs/index.dart';
+import '/flutter_flow/flutter_flow_theme.dart';
+import '/flutter_flow/flutter_flow_util.dart';
+import 'index.dart';
+import '/custom_code/actions/index.dart';
+import 'package:flutter/material.dart';
+// Begin custom widget code
+// DO NOT REMOVE OR MODIFY THE CODE ABOVE!
+```
+
+### State Management
+- Use `FFAppState()` singleton for global state
+- Use `safeSetState()` which checks `mounted` before calling `setState()`
+- Use `context.watch<FFAppState>()` for reactive UI
+
+### Custom Action Pattern
+```dart
+Future<String> myAction(BuildContext context, String param) async {
+  try {
+    final result = await someAsyncOperation();
+    return result;
+  } catch (e) {
+    return 'error: ${e.toString()}';
+  }
 }
 ```
 
-### Widget Lifecycle
-- `initState()`: Set up streams, controllers, listeners
-- `dispose()`: Cancel subscriptions, dispose controllers, stop animations
-- `build()`: Use `context.watch<FFAppState>()` for reactive state
-- Always check `mounted` before `setState()` in async callbacks
+### Error Handling
+- Return error strings prefixed with `'error: '`
+- Use `debugPrint()` for logging
+- Wrap async operations in `try-catch`
+
+## Anti-Patterns
+
+- **Never** expose ElevenLabs API key client-side (use token endpoint)
+- **Never** use raw `setState()` (use `safeSetState()`)
+- **Never** modify automatic FlutterFlow import blocks
+- **Never** skip `mounted` checks in async callbacks
+- **Avoid** `print()` (use `debugPrint()`)
+
+## FlutterFlow Specifics
+
+- `lib/custom_code/**` excluded from `flutter analyze`
+- Model pattern: `*_widget.dart` + `*_model.dart`
+- Use `wrapWithModel()` for widget models
+- Custom code must start with automatic import block
+
+## Key Dependencies
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| elevenlabs_agents | ^0.3.0 | WebRTC conversation SDK |
+| just_audio | ^0.10.4 | Audio playback |
+| record | ^6.0.0 | Audio recording |
+| permission_handler | 12.0.0+1 | Mic/Bluetooth permissions |
+| web_socket_channel | ^3.0.0 | WebSocket connections |
+
+## Platform Notes
+
+- **iOS Simulator**: Cannot capture microphone for WebRTC (test on physical device)
+- **Android**: Requires RECORD_AUDIO, BLUETOOTH, INTERNET permissions
+- **Web**: Limited audio support for conversational AI

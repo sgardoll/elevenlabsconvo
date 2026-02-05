@@ -188,7 +188,7 @@ class _SimpleRecordingButtonState extends State<SimpleRecordingButton>
         return Icons.stop;
       case ConversationState.playing:
         return Icons
-            .pause; // Changed from volume_up to pause to indicate tap-to-interrupt
+            .stop; // Stop icon to indicate tap ends conversation
       case ConversationState.connecting:
         return Icons.sync;
       case ConversationState.error:

@@ -450,12 +450,30 @@ class ElevenLabsSdkService extends ChangeNotifier {
   }
 
   /// Trigger interruption (stop agent speaking)
+  /// This ends the current conversation session completely
   Future<void> triggerInterruption() async {
-    debugPrint('Manual interruption triggered');
-    // The SDK handles interruption automatically when user speaks
-    // But we can unmute to allow user to interrupt
-    if (_client != null && _client!.isMuted) {
-      await _client!.setMicMuted(false);
+    debugPrint('Manual interruption triggered - ending conversation session');
+    
+    // End the session to stop the agent completely
+    // This is the only reliable way to stop the agent from speaking
+    // and prevent it from responding again
+    if (_client != null) {
+      try {
+        await _client!.endSession();
+        debugPrint('Conversation session ended');
+        
+        // Update state
+        _updateState(ConversationState.idle);
+        _connectionController.add('disconnected');
+        
+        // Update FFAppState
+        FFAppState().update(() {
+          FFAppState().wsConnectionState = 'disconnected';
+          FFAppState().isRecording = false;
+        });
+      } catch (e) {
+        debugPrint('Error ending session during interruption: $e');
+      }
     }
   }
 

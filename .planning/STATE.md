@@ -50,6 +50,12 @@ None yet.
 
 None yet.
 
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 001 | Fix agent interruption - stop button keeps agent coming back | 2026-02-06 | [pending] | [001-fix-agent-interruption](./quick/001-fix-agent-interruption/) |
+
 ## Session Continuity
 
 Last session: 2026-02-05 07:55

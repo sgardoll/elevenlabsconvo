@@ -98,6 +98,9 @@ coverage/
 
 # Refactor session files (optional - remove if you want to track these)
 refactor/
+MIGRATION/
+MIGRATION_GUIDE.md
+MIGRATION_PATH.md
 
 # Environment and secrets
 .env
