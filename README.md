@@ -1,6 +1,10 @@
-# UPDATED: ElevenLabs Conversational AI v2 for FlutterFlow
+# UPDATED: ElevenLabs Conversational AI v2 Library for FlutterFlow
 
-A complete Flutter implementation of the **ElevenLabs Conversational AI v2 API** using the official `elevenlabs_agents` Flutter SDK, designed specifically for FlutterFlow projects. This library provides state-of-the-art conversational AI capabilities with real-time voice interactions via WebRTC, advanced turn-taking models, and enterprise-grade features.
+![tmporx1p7pn (1)](https://github.com/user-attachments/assets/7b9f384f-7885-4853-b01c-5fa7be4017c2)
+**
+Add speech-to-speech AI conversations to your FlutterFlow app — powered by ElevenLabs Agents. **
+
+This FlutterFlow library gives your profject seamless access to the state-of-the-art **ElevenLabs Conversational AI v2 API** using the official **'elevenlabs_agents'** Flutter SDK. This library unlocks real-time speech-to-speech (conversational) interactions via WebRTC and Elevenlabs Agents. It includes access to advanced turn-taking models, and enterprise-grade features.  
 
 ## 🔐 Secure Architecture
 
