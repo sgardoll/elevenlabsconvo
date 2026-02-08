@@ -1,3 +1,55 @@
+# Migration Guide: FlutterFlow Branch → Main Branch Compatibility
+
+This guide walks through updating your FlutterFlow project to use the **official ElevenLabs SDK** and match the main branch architecture.
+
+---
+
+## Overview of Changes
+
+### What's Changing
+
+| Component | FlutterFlow Branch (Old) | Main Branch (New) |
+|-----------|---------------------------|-------------------|
+| **Core Service** | `ConversationalAIService` (custom WebSocket) | `ElevenLabsSdkService` (official SDK) |
+| **Audio Handling** | Manual recording/playback | Native WebRTC via SDK |
+| **Dependencies** | Custom packages | `elevenlabs_agents: ^0.3.0` |
+| **App State** | Basic tracking | Enhanced state management |
+| **Documentation** | Minimal | Complete (AGENTS.md + detailed README) |
+
+---
+
+## Migration Steps (Follow in Order)
+
+---
+
+### STEP 1: Update Dependencies in FlutterFlow
+
+**Action**: Add the ElevenLabs SDK package
+
+1. In FlutterFlow, go to **Settings → Packages**
+2. Add this package to your `pubspec.yaml` dependencies:
+   ```yaml
+   dependencies:
+     elevenlabs_agents: ^0.3.0
+   ```
+3. **Note**: You may need to use "Code" tab in FlutterFlow to edit pubspec.yaml directly
+
+**Why**: Main branch uses official SDK instead of custom WebSocket implementation
+
+---
+
+### STEP 2: Replace Core Service via Custom Code
+
+**Action**: Create/Update the main service file
+
+In FlutterFlow **Custom Code** section:
+
+1. **Delete** (or backup) `lib/custom_code/conversational_ai_service.dart`
+2. **Create** `lib/custom_code/elevenlabs_sdk_service.dart`
+
+**Paste this content** (from main branch):
+
+```dart
 import 'dart:async';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
@@ -7,7 +59,6 @@ import 'package:livekit_client/livekit_client.dart' as livekit;
 import '/flutter_flow/flutter_flow_util.dart';
 import '/custom_code/actions/index.dart';
 
-/// Conversation state enum matching the old service interface
 enum ConversationState {
   idle,
   connecting,
@@ -17,7 +68,6 @@ enum ConversationState {
   error
 }
 
-/// Message class for conversation transcripts
 class ConversationMessage {
   final String type;
   final String content;
@@ -39,49 +89,34 @@ class ConversationMessage {
       };
 }
 
-/// ElevenLabs SDK Service Wrapper
-/// Provides a simplified interface to the official ElevenLabs Flutter SDK
 class ElevenLabsSdkService extends ChangeNotifier {
-  static final ElevenLabsSdkService _instance =
-      ElevenLabsSdkService._internal();
+  static final ElevenLabsSdkService _instance = ElevenLabsSdkService._internal();
   factory ElevenLabsSdkService() => _instance;
   ElevenLabsSdkService._internal();
 
-  // SDK client - created once and reused
   ConversationClient? _client;
-
-  // Configuration
   String _agentId = '';
   String _endpoint = '';
-
-  // State management
   bool _isDisposing = false;
   ConversationState _currentState = ConversationState.idle;
   bool _permissionGranted = false;
 
-  // Reactive streams for UI
-  final _conversationController =
-      StreamController<ConversationMessage>.broadcast();
+  final _conversationController = StreamController<ConversationMessage>.broadcast();
   final _stateController = StreamController<ConversationState>.broadcast();
   final _recordingController = StreamController<bool>.broadcast();
   final _connectionController = StreamController<String>.broadcast();
 
-  // Public streams
-  Stream<ConversationMessage> get conversationStream =>
-      _conversationController.stream;
+  Stream<ConversationMessage> get conversationStream => _conversationController.stream;
   Stream<ConversationState> get stateStream => _stateController.stream;
   Stream<bool> get recordingStream => _recordingController.stream;
   Stream<String> get connectionStream => _connectionController.stream;
 
-  // Getters
-  bool get isRecording =>
-      _client?.isMuted == false && _currentState == ConversationState.recording;
+  bool get isRecording => _client?.isMuted == false && _currentState == ConversationState.recording;
   bool get isAgentSpeaking => _client?.isSpeaking ?? false;
   bool get isConnected => _client?.status == ConversationStatus.connected;
   bool get isDisposing => _isDisposing;
   ConversationState get currentState => _currentState;
 
-  /// Request microphone permission
   Future<bool> _requestMicrophonePermission() async {
     if (_permissionGranted) return true;
 
@@ -98,7 +133,6 @@ class ElevenLabsSdkService extends ChangeNotifier {
     return _permissionGranted;
   }
 
-  /// Get conversation token from the endpoint
   Future<String?> _getConversationToken() async {
     debugPrint('Getting conversation token from endpoint');
     final token = await getSignedUrl(_agentId, _endpoint);
@@ -111,7 +145,6 @@ class ElevenLabsSdkService extends ChangeNotifier {
     }
   }
 
-  /// Initialize the client (create once)
   void _initializeClient() {
     if (_client != null) {
       debugPrint('Client already exists, reusing...');
@@ -146,7 +179,6 @@ class ElevenLabsSdkService extends ChangeNotifier {
           _handleModeChange(mode: mode);
         },
         onVadScore: ({required vadScore}) {
-          // Voice activity detection - useful for debugging
           if (vadScore > 0.5) {
             debugPrint('>>> VAD score: $vadScore');
           }
@@ -159,7 +191,6 @@ class ElevenLabsSdkService extends ChangeNotifier {
         },
         onUserTranscript: ({required transcript, required eventId}) {
           debugPrint('>>> User said: "$transcript"');
-          // Add user transcript to conversation messages for UI display
           if (transcript.isNotEmpty && transcript != '...') {
             final userMessage = ConversationMessage(
               type: 'user',
@@ -183,24 +214,16 @@ class ElevenLabsSdkService extends ChangeNotifier {
     debugPrint('ConversationClient created successfully');
   }
 
-  /// Initialize the service and connect to ElevenLabs
   Future<String> initialize({
     required String agentId,
     required String endpoint,
   }) async {
-    // Check if running on iOS simulator
-    if (Platform.isIOS && kDebugMode) {
-      debugPrint('⚠️ WARNING: iOS Simulator does not support microphone input');
-      debugPrint('⚠️ For voice conversations, test on a physical iOS device');
-    }
-
     debugPrint('========================================');
     debugPrint('Initializing ElevenLabs SDK Service');
     debugPrint('  agentId: $agentId');
     debugPrint('  endpoint: $endpoint');
     debugPrint('========================================');
 
-    // Check if already connected with same config
     if (_agentId == agentId && _endpoint == endpoint && isConnected) {
       debugPrint('Service already initialized and connected');
       return 'success';
@@ -211,7 +234,6 @@ class ElevenLabsSdkService extends ChangeNotifier {
     _endpoint = endpoint;
 
     try {
-      // Step 1: Request microphone permission
       final hasPermission = await _requestMicrophonePermission();
       if (!hasPermission) {
         throw Exception('Microphone permission denied');
@@ -220,25 +242,20 @@ class ElevenLabsSdkService extends ChangeNotifier {
       _updateState(ConversationState.connecting);
       _connectionController.add('connecting');
 
-      // Step 2: Get conversation token from backend
       final token = await _getConversationToken();
       if (token == null) {
         throw Exception('Failed to obtain conversation token');
       }
       debugPrint('Token obtained (length: ${token.length})');
 
-      // Step 3: End any existing session
-      if (_client != null &&
-          _client!.status != ConversationStatus.disconnected) {
+      if (_client != null && _client!.status != ConversationStatus.disconnected) {
         debugPrint('Ending existing session...');
         await _client!.endSession();
         await Future.delayed(const Duration(milliseconds: 500));
       }
 
-      // Step 4: Initialize client if needed
       _initializeClient();
 
-      // Step 5: Start session with token and userId
       debugPrint('Starting session with conversationToken...');
       final userId = 'user-${DateTime.now().millisecondsSinceEpoch}';
       await _client!.startSession(
@@ -269,13 +286,11 @@ class ElevenLabsSdkService extends ChangeNotifier {
   void _onClientChanged() {
     if (_client == null) return;
 
-    // Update state based on client status
     final status = _client!.status;
     final isSpeaking = _client!.isSpeaking;
     final isMuted = _client!.isMuted;
 
-    debugPrint(
-        'Client changed: status=$status, isSpeaking=$isSpeaking, isMuted=$isMuted');
+    debugPrint('Client changed: status=$status, isSpeaking=$isSpeaking, isMuted=$isMuted');
 
     ConversationState newState;
     if (status == ConversationStatus.disconnected) {
@@ -298,9 +313,7 @@ class ElevenLabsSdkService extends ChangeNotifier {
       _updateState(newState);
     }
 
-    // Update recording stream
-    _recordingController
-        .add(!isMuted && status == ConversationStatus.connected);
+    _recordingController.add(!isMuted && status == ConversationStatus.connected);
 
     notifyListeners();
   }
@@ -333,7 +346,6 @@ class ElevenLabsSdkService extends ChangeNotifier {
   void _handleMessage({required String message, required Role source}) {
     debugPrint('Message from $source: $message');
 
-    // Only add agent messages here - user messages are handled by onUserTranscript
     if (source == Role.ai) {
       final conversationMessage = ConversationMessage(
         type: 'agent',
@@ -347,7 +359,6 @@ class ElevenLabsSdkService extends ChangeNotifier {
 
   void _handleError(String message, [dynamic context]) {
     debugPrint('SDK Error: $message, context: $context');
-    // Don't transition to error state for all errors - some are recoverable
     _connectionController.add('error: $message');
   }
 
@@ -376,7 +387,6 @@ class ElevenLabsSdkService extends ChangeNotifier {
     });
   }
 
-  /// Toggle recording (mute/unmute in SDK terms)
   Future<String> toggleRecording() async {
     if (_client == null || !isConnected) {
       return 'error: Not connected';
@@ -385,8 +395,7 @@ class ElevenLabsSdkService extends ChangeNotifier {
     try {
       await _client!.toggleMute();
       final isMuted = _client!.isMuted;
-      debugPrint(
-          'Recording ${isMuted ? 'stopped (muted)' : 'started (unmuted)'}');
+      debugPrint('Recording ${isMuted ? 'stopped (muted)' : 'started (unmuted)'}');
 
       FFAppState().update(() {
         FFAppState().isRecording = !isMuted;
@@ -399,7 +408,6 @@ class ElevenLabsSdkService extends ChangeNotifier {
     }
   }
 
-  /// Start recording (unmute)
   Future<String> startRecording() async {
     if (_client == null || !isConnected) {
       return 'error: Not connected';
@@ -424,7 +432,6 @@ class ElevenLabsSdkService extends ChangeNotifier {
     }
   }
 
-  /// Stop recording (mute)
   Future<String> stopRecording() async {
     if (_client == null || !isConnected) {
       return 'error: Not connected';
@@ -449,38 +456,13 @@ class ElevenLabsSdkService extends ChangeNotifier {
     }
   }
 
-  /// Trigger interruption (stop agent speaking)
-  /// This ends the current conversation session completely
   Future<void> triggerInterruption() async {
-    debugPrint('Manual interruption triggered - ending conversation session');
-
-    // End the session to stop the agent completely
-    // This is the only reliable way to stop the agent from speaking
-    // and prevent it from responding again
-    if (_client != null) {
-      try {
-        _client!.removeListener(_onClientChanged);
-        await _client!.endSession();
-        _client!.dispose();
-        _client = null;
-        debugPrint('Conversation session ended and client disposed');
-
-        // Update state
-        _updateState(ConversationState.idle);
-        _connectionController.add('disconnected');
-
-        // Update FFAppState
-        FFAppState().update(() {
-          FFAppState().wsConnectionState = 'disconnected';
-          FFAppState().isRecording = false;
-        });
-      } catch (e) {
-        debugPrint('Error ending session during interruption: $e');
-      }
+    debugPrint('Manual interruption triggered');
+    if (_client != null && _client!.isMuted) {
+      await _client!.setMicMuted(false);
     }
   }
 
-  /// Send a text message
   Future<String> sendTextMessage(String text) async {
     if (_client == null || !isConnected) {
       return 'error: Not connected';
@@ -496,7 +478,6 @@ class ElevenLabsSdkService extends ChangeNotifier {
     }
   }
 
-  /// Dispose the service
   Future<void> dispose() async {
     debugPrint('Disposing ElevenLabs SDK Service');
     _isDisposing = true;
@@ -518,3 +499,326 @@ class ElevenLabsSdkService extends ChangeNotifier {
     debugPrint('ElevenLabs SDK Service disposed');
   }
 }
+```
+
+---
+
+### STEP 3: Update Custom Actions
+
+#### 3a. Update `initialize_conversation_service.dart`
+
+**In FlutterFlow Custom Actions → initialize_conversation_service**:
+
+Replace entire action code with:
+
+```dart
+// Automatic FlutterFlow imports
+import '/backend/schema/structs/index.dart';
+import '/flutter_flow/flutter_flow_theme.dart';
+import '/flutter_flow/flutter_flow_util.dart';
+import 'index.dart';
+import 'package:flutter/material.dart';
+// Begin custom action code
+// DO NOT REMOVE OR MODIFY THE CODE ABOVE!
+
+Future<void> initializeConversationService(
+  String agentId,
+  String endpoint,
+) async {
+  try {
+    final svc = ElevenLabsSdkService();
+
+    final res = await svc.initialize(
+      agentId: agentId,
+      endpoint: endpoint,
+    );
+
+    if (res == 'success') {
+      FFAppState().update(() {
+        FFAppState().wsConnectionState = 'connected';
+        FFAppState().elevenLabsAgentId = agentId;
+        FFAppState().endpoint = endpoint;
+      });
+    } else {
+      FFAppState().update(() {
+        FFAppState().wsConnectionState = res;
+      });
+    }
+  } catch (e) {
+    debugPrint('Error initializing conversation service: $e');
+    FFAppState().update(() {
+      FFAppState().wsConnectionState = 'error:${e.toString()}';
+      FFAppState().isRecording = false;
+    });
+  }
+}
+```
+
+**Changes**:
+- Removed unused parameters (`firstMessage`, `language`, `keepMicHotDuringAgent`, `autoStartMic`)
+- Changed import from `conversational_ai_service.dart` to `elevenlabs_sdk_service.dart`
+- Simplified initialization logic
+
+#### 3b. Update `simple_recording_button.dart`
+
+**In FlutterFlow Custom Widgets → simple_recording_button**:
+
+Change the import statement at the top:
+
+```dart
+// From:
+import '/custom_code/conversational_ai_service.dart';
+
+// To:
+import '/custom_code/elevenlabs_sdk_service.dart';
+```
+
+And update the service instantiation:
+
+```dart
+// From:
+final ConversationalAIService _service = ConversationalAIService();
+
+// To:
+final ElevenLabsSdkService _service = ElevenLabsSdkService();
+```
+
+And update the interrupt method call:
+
+```dart
+// From:
+await _service.interrupt();
+
+// To:
+await _service.triggerInterruption();
+```
+
+---
+
+### STEP 4: Update App State Variables
+
+**In FlutterFlow App State → State Variables**:
+
+Add these new variables if they don't exist:
+
+| Variable Name | Type | Initial Value |
+|--------------|------|---------------|
+| `elevenLabsAgentId` | String | `''` |
+| `endpoint` | String | `''` |
+| `wsConnectionState` | String | `'disconnected'` |
+| `isRecording` | Boolean | `false` |
+| `conversationMessages` | List of JSON | `[]` |
+| `isAgentSpeaking` | Boolean | `false` |
+
+**Note**: Most of these likely already exist - just verify.
+
+---
+
+### STEP 5: Update Platform Configuration
+
+#### 5a. Android Manifest
+
+**In FlutterFlow** → Settings → Android → Edit AndroidManifest.xml:
+
+Replace the permissions section with:
+
+```xml
+<uses-permission android:name="android.permission.INTERNET"/>
+<uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+<uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+<uses-permission android:name="android.permission.RECORD_AUDIO"/>
+<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+<uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+<uses-permission android:name="android.permission.CAMERA"/>
+```
+
+#### 5b. iOS Info.plist
+
+**In FlutterFlow** → Settings → iOS → Edit Info.plist:
+
+Ensure these entries exist:
+
+```xml
+<key>NSMicrophoneUsageDescription</key>
+<string>This app needs microphone access for voice conversations</string>
+<key>NSBluetoothAlwaysUsageDescription</key>
+<string>This app requires access to Bluetooth in order to communicate with AI Agents</string>
+<key>UIBackgroundModes</key>
+<array>
+    <string>audio</string>
+    <string>voip</string>
+</array>
+```
+
+---
+
+### STEP 6: Update Build Configuration
+
+#### 6a. iOS Podfile
+
+**In FlutterFlow** → Settings → iOS → Edit Podfile:
+
+Ensure minimum version is set:
+
+```ruby
+platform :ios, '14.0.0'
+```
+
+**Note**: This should already be set if using recent FlutterFlow.
+
+#### 6b. Android build.gradle
+
+**In FlutterFlow** → Settings → Android → Edit android/app/build.gradle:
+
+Update to:
+
+```gradle
+android {
+    defaultConfig {
+        minSdkVersion 21
+        targetSdkVersion 34
+    }
+}
+```
+
+---
+
+### STEP 7: Add Documentation Files
+
+#### 7a. Add AGENTS.md
+
+**In FlutterFlow** → Custom Code:
+
+Create file `AGENTS.md` and paste the content from main branch (see MIGRATION/AGENTS.md.txt in this repo).
+
+#### 7b. Update README.md
+
+**In FlutterFlow** → Project Settings → Description:
+
+Update your project README to match the main branch version (see MIGRATION/README.md.txt in this repo).
+
+**Critical Sections to Include**:
+- iOS Simulator limitation warning
+- Complete setup guide
+- Platform permissions
+- Security best practices
+
+---
+
+### STEP 8: Test on Physical Device
+
+**CRITICAL**: After completing all steps:
+
+1. **Run on physical iPhone** (iOS 14.0+)
+2. **Run on Android device** (API 21+)
+3. Test conversation flow:
+   - Initialize conversation
+   - Speak and verify transcription
+   - Agent response
+   - Tap to interrupt
+   - Stop conversation
+
+**DO NOT TEST ON IOS SIMULATOR** for voice features - it won't work due to WebRTC limitations.
+
+---
+
+### STEP 9: Verify Build Configuration
+
+Run these commands to ensure everything compiles:
+
+```bash
+flutter clean
+flutter pub get
+flutter analyze
+flutter build apk --debug
+flutter build ios --debug
+```
+
+Fix any errors before proceeding to production.
+
+---
+
+## Migration Checklist
+
+Use this checklist to track your progress:
+
+- [ ] **STEP 1**: Added `elevenlabs_agents: ^0.3.0` to pubspec.yaml
+- [ ] **STEP 2**: Created `elevenlabs_sdk_service.dart`
+- [ ] **STEP 2**: Deleted/Backed up `conversational_ai_service.dart`
+- [ ] **STEP 3a**: Updated `initialize_conversation_service.dart`
+- [ ] **STEP 3b**: Updated `simple_recording_button.dart`
+- [ ] **STEP 4**: Verified App State variables
+- [ ] **STEP 5a**: Updated AndroidManifest.xml permissions
+- [ ] **STEP 5b**: Updated Info.plist permissions
+- [ ] **STEP 6**: Verified build configuration
+- [ ] **STEP 7a**: Added AGENTS.md
+- [ ] **STEP 7b**: Updated README.md
+- [ ] **STEP 8**: Tested on physical iOS device
+- [ ] **STEP 8**: Tested on Android device
+- [ ] **STEP 9**: Ran `flutter analyze` with no errors
+- [ ] **STEP 9**: Successfully built APK and IPA
+
+---
+
+## Common Issues & Solutions
+
+### Issue: "import '/custom_code/elevenlabs_sdk_service.dart' not found"
+
+**Solution**: Make sure you created the file in Custom Code section and saved it properly in FlutterFlow.
+
+### Issue: "Class 'ConversationClient' not found"
+
+**Solution**: Run `flutter pub get` after adding the dependency. Verify pubspec.yaml has `elevenlabs_agents: ^0.3.0`.
+
+### Issue: iOS app crashes on launch
+
+**Solution**:
+1. Delete `ios/Podfile.lock`
+2. Run `flutter clean`
+3. Run `flutter pub get`
+4. Rebuild iOS project
+
+### Issue: Transcripts show "..." even on physical device
+
+**Solution**: This may indicate a permissions issue or network issue:
+1. Check microphone permission is granted
+2. Check network connectivity
+3. Verify agent ID is correct
+4. Check backend endpoint is returning valid tokens
+
+### Issue: Android audio doesn't work
+
+**Solution**: Ensure you have updated AndroidManifest.xml with the new permissions:
+- `BLUETOOTH_SCAN`
+- `BLUETOOTH_CONNECT`
+
+---
+
+## Rollback Plan
+
+If migration fails, you can rollback:
+
+1. Restore `conversational_ai_service.dart` from backup
+2. Remove `elevenlabs_agents` dependency from pubspec.yaml
+3. Revert all custom action changes
+4. Run `flutter pub get`
+5. Test the old implementation
+
+---
+
+## Support
+
+If you encounter issues during migration:
+
+1. Check FlutterFlow documentation for custom code limitations
+2. Review the main branch implementation for reference
+3. Verify all steps in the checklist are complete
+4. Test on physical devices only
+
+---
+
+**Last Updated**: 2026-01-04
+**Target Branch**: flutterflow → main compatibility
+**SDK Version**: elevenlabs_agents ^0.3.0
