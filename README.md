@@ -1,8 +1,8 @@
 # UPDATED: ElevenLabs Conversational AI v2 Library for FlutterFlow
 
 ![tmporx1p7pn (1)](https://github.com/user-attachments/assets/7b9f384f-7885-4853-b01c-5fa7be4017c2)
-**
-Add speech-to-speech AI conversations to your FlutterFlow app — powered by ElevenLabs Agents. **
+
+## Add speech-to-speech AI conversations to your FlutterFlow app — powered by ElevenLabs Agents. ##
 
 This FlutterFlow library gives your profject seamless access to the state-of-the-art **ElevenLabs Conversational AI v2 API** using the official **'elevenlabs_agents'** Flutter SDK. This library unlocks real-time speech-to-speech (conversational) interactions via WebRTC and Elevenlabs Agents. It includes access to advanced turn-taking models, and enterprise-grade features.  
 
@@ -27,7 +27,7 @@ This approach represents the pinnacle of API key security by implementing a comp
   -   **Real-time Voice Conversations**: Low-latency, bidirectional audio streaming via WebRTC powered by the `elevenlabs_agents` SDK.
   -   **Advanced Turn-Taking**: Client-side Voice Activity Detection (VAD) with intelligent interruption handling.
   -   **Multi-modal Support**: Audio input/output with text transcription.
-  -   **State-of-the-art TTS**: Uses ElevenLabs Turbo v2.5 for ultra-low latency speech synthesis.
+  -   **State-of-the-art TTS**: For ultra-low latency speech synthesis.
   -   **Robust Connection Management**: Automatic reconnection and error recovery via the SDK.
   -   **Audio Feedback Prevention**: Intelligent recording pause during agent speech.
   -   **FlutterFlow Integration**: Full App State integration and reactive UI updates.
@@ -82,7 +82,7 @@ bool isInitializing = false; // True during service initialization
 
 ### 3\. Platform Permissions
 
-Add to your platform configuration files:
+Add to your FlutterFlow permissions screen (Android) or the configuration files (iOS):
 
 #### Android (`android/app/src/main/AndroidManifest.xml`)
 
