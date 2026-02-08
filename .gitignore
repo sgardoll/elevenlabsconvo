@@ -99,6 +99,12 @@ coverage/
 # Refactor session files (optional - remove if you want to track these)
 refactor/
 
+# Planning and migration documentation (development artifacts)
+.planning/
+MIGRATION/
+MIGRATION_GUIDE.md
+MIGRATION_PATH.md
+
 # Environment and secrets
 .env
 .env.*
@@ -107,3 +113,4 @@ credentials.json
 secrets.json
 google-services.json
 GoogleService-Info.plist
+ElevenLabs Conversational AI - Usage Instructions.pdf

@@ -25,7 +25,7 @@ PODS:
     - FlutterMacOS
   - permission_handler_apple (9.3.0):
     - Flutter
-  - record_ios (1.1.0):
+  - record_ios (1.2.0):
     - Flutter
   - shared_preferences_foundation (0.0.1):
     - Flutter
@@ -102,7 +102,7 @@ SPEC CHECKSUMS:
   livekit_client: 53ca658779b78710fb458cccee28b53a13356c15
   path_provider_foundation: 080d55be775b7414fd5a5ef3ac137b97b097e564
   permission_handler_apple: 4ed2196e43d0651e8ff7ca3483a069d469701f2d
-  record_ios: f75fa1d57f840012775c0e93a38a7f3ceea1a374
+  record_ios: 412daca2350b228e698fffcd08f1f94ceb1e3844
   shared_preferences_foundation: 9e1978ff2562383bd5676f64ec4e9aa8fa06a6f7
   sqflite: c35dad70033b8862124f8337cc994a809fcd9fa3
   url_launcher_ios: 694010445543906933d732453a59da0a173ae33d
