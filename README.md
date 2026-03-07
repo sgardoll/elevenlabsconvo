@@ -1,276 +1,385 @@
-# UPDATED: ElevenLabs Conversational AI v2 Library for FlutterFlow
+# ElevenLabs Conversational AI v2 Library for FlutterFlow
 
-![tmporx1p7pn (1)](https://github.com/user-attachments/assets/7b9f384f-7885-4853-b01c-5fa7be4017c2)
+![ElevenLabs Conversational AI](https://github.com/user-attachments/assets/7b9f384f-7885-4853-b01c-5fa7be4017c2)
 
-## Add speech-to-speech AI conversations to your FlutterFlow app — powered by ElevenLabs Agents. ##
+## Add real-time voice conversations to your FlutterFlow app with ElevenLabs Agents
 
-This FlutterFlow library gives your profject seamless access to the state-of-the-art **ElevenLabs Conversational AI v2 API** using the official **'elevenlabs_agents'** Flutter SDK. This library unlocks real-time speech-to-speech (conversational) interactions via WebRTC and Elevenlabs Agents. It includes access to advanced turn-taking models, and enterprise-grade features.  
+This library is built for **FlutterFlow users** who want to add natural, speech-to-speech AI conversations to their app without exposing secret keys in the client. It connects your FlutterFlow project to **ElevenLabs Conversational AI v2** using the official ElevenLabs Flutter SDK under the hood, while keeping the setup focused on what you can actually configure inside the **FlutterFlow interface**.
 
-## 🔐 Secure Architecture
+---
 
-This library employs a cutting-edge, secure architecture to protect your ElevenLabs API key, ensuring it is never exposed on the client-side.
+## Who this is for
 
-  *   **Server-Side API Key Management**: Your ElevenLabs API key is stored and managed exclusively in a secure cloud environment. The client application no longer directly handles or stores the API key.
-  *   **Conversation Token Generation**: The client communicates with a cloud function (e.g., on BuildShip, Xano, or n8n) to request a temporary `conversationToken`. This token grants a short-lived, secure connection for the `elevenlabs_agents` SDK.
-  *   **Secure WebRTC Communication**: The `elevenlabs_agents` SDK handles secure WebRTC communication internally, ensuring ultra-low latency, encrypted audio streaming.
-  *   **Cloud Function Templates**: To simplify the server-side setup, we provide templates for popular low-code/no-code platforms:
-      *   **BuildShip** (Available now)
+This README is written for a **FlutterFlow builder** who is:
 
-This approach represents the pinnacle of API key security by implementing a complete separation between client applications and sensitive credentials.
+- installing the library from the **FlutterFlow Marketplace**
+- configuring values in **App State**, **API Calls**, **page actions**, and **widgets**
+- avoiding direct code edits unless FlutterFlow explicitly asks for platform configuration
 
------
+If you are using this library in FlutterFlow, the supported install path is the **Marketplace import flow**.
+
+---
+
+## 🔐 Secure architecture
+
+This library is designed so your **ElevenLabs API key never lives in FlutterFlow App State, page state, custom actions, or client-side code**.
+
+### How the secure flow works
+
+1. You create an agent in **ElevenLabs**
+2. You store your ElevenLabs API key in a secure backend service such as **BuildShip**
+3. Your FlutterFlow app calls that backend to request a temporary **conversation token**
+4. The library uses that token to start a secure real-time conversation
+5. Audio streams through WebRTC without exposing your secret key in the app
+
+### Why this matters
+
+- Your API key is not shipped in the app
+- Your FlutterFlow project remains safe to share with collaborators
+- You can rotate backend secrets without changing app screens
+- Tokens are short-lived and safer than using a raw API key on-device
+
+---
 
 ## 🚀 Features
 
-### Core Capabilities
+### Voice conversation features
 
-  -   **Real-time Voice Conversations**: Low-latency, bidirectional audio streaming via WebRTC powered by the `elevenlabs_agents` SDK.
-  -   **Advanced Turn-Taking**: Client-side Voice Activity Detection (VAD) with intelligent interruption handling.
-  -   **Multi-modal Support**: Audio input/output with text transcription.
-  -   **State-of-the-art TTS**: For ultra-low latency speech synthesis.
-  -   **Robust Connection Management**: Automatic reconnection and error recovery via the SDK.
-  -   **Audio Feedback Prevention**: Intelligent recording pause during agent speech.
-  -   **FlutterFlow Integration**: Full App State integration and reactive UI updates.
+- **Real-time speech-to-speech AI conversations**
+- **Low-latency streaming audio** powered by WebRTC
+- **Interruptions and turn-taking** for more natural conversations
+- **Transcripts and conversation state** exposed to FlutterFlow
+- **Automatic reconnect behavior** for unstable connections
+- **Playback-aware recording behavior** to reduce audio feedback
 
-### FlutterFlow-Specific Features
+### FlutterFlow-friendly features
 
-  -   **Custom Widgets**: Pre-built recording button with visual feedback.
-  -   **Custom Actions**: Simple initialize/stop conversation management.
-  -   **App State Integration**: Automatic synchronization with FFAppState.
-  -   **Theme Integration**: Respects FlutterFlow theme colors and styles.
-  -   **Permission Handling**: Seamless microphone, Bluetooth, and background audio permission management.
+- **Custom widget** for recording interaction
+- **Custom actions** to initialize and stop the session
+- **App State integration** so your UI can react visually
+- **Theme-aware behavior** for FlutterFlow UI styling
+- **Permission handling support** for microphone and audio routing
 
------
+---
 
-## 🛠️ Quick Setup
+## 🛍️ Installation
 
-### 1\. Server-Side Configuration
+### Install from the FlutterFlow Marketplace
 
-Before using the library, you need to set up your secure cloud function endpoint.
+1. Open the library in the **FlutterFlow Marketplace**:
+   [ElevenLabs Conversational AI v2](https://marketplace.flutterflow.io/item/6iqd6d7dIphUrTANELHe)
+2. Click **Add to Project**
+3. Complete the FlutterFlow import flow
+4. Wait for FlutterFlow to finish syncing dependencies
 
-1.  **Get ElevenLabs Credentials**:
-      *   **ElevenLabs API Key**: Get from [ElevenLabs Dashboard](https://elevenlabs.io/app/settings/api-keys).
-      *   **Agent ID**: Create a conversational agent in ElevenLabs and copy its ID.
-2.  **Deploy Cloud Function**:
-      *   Choose a provider (e.g., BuildShip).
-      *   Use our template to deploy a function that takes your Agent ID and returns a `conversationToken`.
-      *   Store your ElevenLabs API Key securely within the cloud function's environment variables.
-      *   Copy the deployed function's endpoint URL.
+That is the installation path FlutterFlow users should follow.
 
-### 2\. FlutterFlow App State
+---
 
-Ensure these variables exist in your FlutterFlow App State:
+## 🧩 What you need before setup
 
-```dart
-// Connection state tracking
-String wsConnectionState = 'disconnected'; // Reflects connection status (e.g., 'connected', 'disconnected')
+Before configuring the library in FlutterFlow, make sure you have:
 
-// Secure Endpoint and Agent ID
-String elevenLabsAgentId = ''; // Your ElevenLabs Agent ID
-String elevenLabsConversationTokenEndpoint = ''; // Your Cloud Function Endpoint URL for conversation tokens
+- an **ElevenLabs account**
+- an **ElevenLabs Agent ID**
+- a secure backend endpoint that returns a **conversation token**
+- a FlutterFlow project with the marketplace library added
 
-// Recording state
-bool isRecording = false; // True when audio is being recorded
+### Recommended backend option
 
-// Conversation messages
-List<dynamic> conversationMessages = []; // List to store conversation turns (text/audio)
+The easiest low-code pattern is:
 
-// Additional states from ElevenLabsSdkService
-bool isAgentSpeaking = false; // True when the ElevenLabs agent is speaking
-bool isInitializing = false; // True during service initialization
+- **FlutterFlow** → sends request to your backend
+- **BuildShip** → uses your ElevenLabs API key securely
+- **BuildShip** → returns a temporary `conversationToken`
+- **FlutterFlow** → starts the conversation using that token
+
+---
+
+## ⚙️ FlutterFlow setup
+
+## Step 1: Create your ElevenLabs agent
+
+In ElevenLabs:
+
+1. Open **Conversational AI**
+2. Create or select your agent
+3. Copy the **Agent ID**
+
+You will store this value in FlutterFlow App State later.
+
+---
+
+## Step 2: Create your secure token endpoint
+
+Use a backend platform such as **BuildShip** to create an endpoint that:
+
+- accepts your `agentId`
+- uses your secret ElevenLabs API key on the server
+- returns a temporary **conversation token**
+
+### Important
+
+Do **not** put your ElevenLabs API key into:
+
+- FlutterFlow App State
+- page parameters
+- custom action inputs
+- API call headers inside FlutterFlow
+- local storage on the device
+
+Only the backend should know the API key.
+
+---
+
+## Step 3: Add App State variables in FlutterFlow
+
+In FlutterFlow, go to **App State** and add these variables.
+
+### Required App State variables
+
+| Variable | Type | Default | Purpose |
+|---|---|---:|---|
+| `wsConnectionState` | String | `disconnected` | Tracks connection status |
+| `elevenLabsAgentId` | String | empty | Stores your ElevenLabs Agent ID |
+| `elevenLabsConversationTokenEndpoint` | String | empty | Stores your backend token endpoint URL |
+| `isRecording` | bool | `false` | Tracks whether the user is currently recording |
+| `conversationMessages` | List < JSON > or List < dynamic > | empty list | Stores transcript/message history |
+| `isAgentSpeaking` | bool | `false` | Tracks whether the AI is currently speaking |
+| `isInitializing` | bool | `false` | Tracks initialization state |
+
+### What to paste into App State
+
+- Set `elevenLabsAgentId` to your real ElevenLabs Agent ID
+- Set `elevenLabsConversationTokenEndpoint` to your deployed backend URL
+
+---
+
+## Step 4: Add your API Call in FlutterFlow
+
+In FlutterFlow, create an **API Call** that requests a conversation token from your backend.
+
+### Example low-code flow
+
+- **Method:** `POST`
+- **URL:** `FFAppState().elevenLabsConversationTokenEndpoint`
+- **Body:** send the `agentId`
+
+### Recommended request body
+
+```json
+{
+  "agentId": "[your agent id from App State]"
+}
 ```
 
-### 3\. Platform Permissions
+### Expected response
 
-Add to your FlutterFlow permissions screen (Android) or the configuration files (iOS):
+Your backend should return a field containing the token, for example:
 
-#### Android (`android/app/src/main/AndroidManifest.xml`)
-
-```xml
-<uses-permission android:name="android.permission.RECORD_AUDIO"/>
-<uses-permission android:name="android.permission.INTERNET"/>
-<uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
-<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
-<uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
-<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
-<uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
-<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+```json
+{
+  "conversationToken": "your-temporary-token"
+}
 ```
 
-#### iOS (`ios/Runner/Info.plist`)
+In FlutterFlow, create a response mapping so you can read that token in your action flow.
 
-```xml
-<key>NSMicrophoneUsageDescription</key>
-<string>This app needs microphone access for voice conversations</string>
-<key>NSBluetoothAlwaysUsageDescription</key>
-<string>This app uses Bluetooth to manage audio devices during conversations.</string>
-<key>UIBackgroundModes</key>
-<array>
-    <string>audio</string>
-    <string>voip</string>
-</array>
-```
+---
 
------
+## Step 5: Configure permissions in FlutterFlow project settings
 
-## 🎯 Implementation Guide
+This library needs microphone access and may also rely on Bluetooth/audio routing behavior depending on the device.
 
-### Basic Implementation
+### Android permissions
 
-Add to your page's "On Page Load" action:
+Make sure your generated Android app includes:
 
-1.  **Request Permissions**
+- `RECORD_AUDIO`
+- `INTERNET`
+- `MODIFY_AUDIO_SETTINGS`
+- `ACCESS_NETWORK_STATE`
+- Bluetooth permissions if your audio path depends on them
+- foreground audio service support if your app uses ongoing conversation flows
 
-    ```dart
-    await requestPermission(microphonePermission);
-    // You might also want to request bluetooth permissions depending on your use case
-    // await requestPermission(bluetoothPermission);
-    ```
+### iOS permissions
 
-2.  **Initialize Service**
+Make sure your generated iOS app includes:
 
-    ```dart
-    // Get the conversation token from your secure backend endpoint
-    String? conversationToken = await GetSignedURLViaBuildShipCallCall.call(
-      agentId: FFAppState().elevenLabsAgentId,
-      // Pass other necessary parameters for your backend function
-    );
+- microphone usage description
+- Bluetooth usage description if applicable
+- audio background modes if your use case requires it
 
-    if (conversationToken != null) {
-      String result = await initializeConversationService(
-        context,
-        conversationToken,
-        FFAppState().elevenLabsAgentId, // The SDK might still need the agent ID
-      );
-      // Handle the result (e.g., show error if initialization failed)
-    } else {
-      // Handle case where conversation token could not be obtained
-    }
-    ```
+If FlutterFlow exposes these through project settings, configure them there. If your project requires platform-specific config outside the UI, use the generated platform settings carefully after export.
 
-3.  **Add Recording Button**
-    Use the `SimpleRecordingButton` custom widget in your UI.
+---
 
-4.  **Display Conversation**
-    Use a ListView with the conversation messages from App State.
+## 🎯 Build the conversation flow in FlutterFlow
 
-### Page Cleanup
+## Page load setup
 
-Add to your page's "On Page Dispose" action:
+On the page where the conversation should start, configure your action flow in FlutterFlow.
 
-```dart
-await stopConversationService();
-```
+### Recommended order
 
------
+1. **Request microphone permission**
+2. **Call your token API**
+3. **Read the returned `conversationToken`**
+4. **Run the custom action to initialize the conversation**
 
-## 🔐 Security & Best Practices
+### Conceptual flow inside FlutterFlow
 
-### API Key Security
+- Action 1: Request microphone permission
+- Action 2: Execute your token API call
+- Action 3: If token exists, run `initializeConversationService`
+- Action 4: If initialization fails, show an error message or snackbar
 
-  -   **Never expose your API key on the client-side.** The key should only reside in your secure cloud function environment.
-  -   The `initializeConversationService` action now uses a `conversationToken` obtained from your secure endpoint, not a raw API key.
-  -   This architecture prevents decompilation of your app from revealing your secret keys.
+### Inputs you will use
 
-### Permission Handling
+The initialize action should receive:
 
-  -   Always request necessary permissions (microphone, Bluetooth) before initialization.
-  -   Handle permission denial gracefully.
+- `conversationToken`
+- your `agentId`
+- current page context as required by FlutterFlow
 
-### Error Handling
+---
 
-  -   All actions return descriptive error messages.
-  -   Connection failures trigger automatic reconnection via the `elevenlabs_agents` SDK.
+## Add the recording widget
 
------
+Place the included recording widget on your page.
 
-## 📦 Installation Options
+### What it does for you
 
-### Option 1: FlutterFlow Marketplace (Recommended)
+- gives the user a clear talk button
+- reacts to conversation state
+- helps prevent recording while the agent is already speaking
+- supports a cleaner low-code setup than manually wiring recording state yourself
 
-Import directly from the FlutterFlow Marketplace: [ElevenLabs Conversational AI v2](https://marketplace.flutterflow.io/item/6iqd6d7dIphUrTANELHe)
+You can place it inside:
 
-1.  Navigate to the marketplace link.
-2.  Click "Add to Project".
-3.  Follow the integration wizard.
-4.  Configure your ElevenLabs `agentId` and `elevenLabsConversationTokenEndpoint` in the App States.
+- a floating action area
+- a chat composer area
+- a bottom sheet
+- a persistent footer on a conversation screen
 
-### Option 2: Manual Integration
+---
 
-If you prefer to integrate manually or are using a plain Flutter project, you'll need to add the required dependencies and custom code.
+## Show conversation messages in the UI
 
-#### 1\. Add Dependencies to `pubspec.yaml`
+Use a **ListView** or repeating UI pattern in FlutterFlow and bind it to:
 
-Add the following to your `pubspec.yaml` under `dependencies`:
+- `FFAppState().conversationMessages`
 
-```yaml
-  elevenlabs_agents: ^0.3.0
-  just_audio: ^0.10.4
-  record: ^6.0.0
-  path_provider: 2.1.4 # Or the latest compatible version
-  permission_handler: 12.0.0+1 # Or the latest compatible version
-  flutter_secure_storage: 9.2.2 # Or the latest compatible version
-  http: 1.4.0 # Or the latest compatible version
-  web_socket_channel: ^3.0.0 # Or the latest compatible version
-```
+Recommended display ideas:
 
-After updating `pubspec.yaml`, run `flutter pub get` in your terminal.
+- user messages on one side
+- agent messages on the other side
+- loading indicator when `isInitializing` is true
+- speaking indicator when `isAgentSpeaking` is true
+- connection status badge using `wsConnectionState`
 
-#### 2\. Copy Custom Code
+---
 
-Copy the custom code files (from the original source) to your FlutterFlow project or Flutter project, ensuring the following structure:
+## Clean up when leaving the page
 
-```
-lib/custom_code/
-├── elevenlabs_sdk_service.dart          # Core service
-├── actions/
-│   ├── index.dart
-│   ├── initialize_conversation_service.dart
-│   └── stop_conversation_service.dart
-│   └── get_signed_url.dart             # For fetching conversation token from your backend
-└── widgets/
-    ├── index.dart
-    └── simple_recording_button.dart
-```
+On **Page Dispose** or when the user exits the conversation screen:
 
------
+- run `stopConversationService`
 
-## 📱 Platform Support
+This helps avoid leaving audio sessions active after navigation.
 
-### Supported Platforms
+---
 
-  -   ✅ iOS (14.0+)
-  -   ✅ Android (API 21+)
-  -   ❌ Web (limited audio support for conversational AI)
+## 🧪 Testing guidance for FlutterFlow users
 
-### iOS Simulator Limitation
+### Test on a real device
 
-The ElevenLabs SDK uses LiveKit's WebRTC implementation, which has known issues capturing microphone input on iOS Simulator.
+If you are testing iOS voice input, use a **physical iPhone**.
 
-**Important:** You MUST test on a physical iOS device to verify audio input works. iOS Simulator will always show "..." for transcripts because it cannot capture real microphone input for WebRTC.
+### iOS Simulator limitation
 
-For proper testing and development:
-- Use a physical iPhone (iOS 14.0+) for voice conversation features
-- iOS Simulator can be used for UI testing and connection verification
-- Audio capture and transcription require physical device microphone access
+The underlying WebRTC stack used by the ElevenLabs SDK does **not reliably capture microphone input in iOS Simulator**.
 
------
+That means:
 
-## 🤝 Support & Contributing
+- your UI may load correctly
+- your connection may still initialize
+- but voice capture and transcript behavior may fail or show incomplete results
 
-### Getting Help
+For final validation, always test on a real device.
 
-  -   Review the debug logs for error details.
-  -   Check ElevenLabs API documentation.
-  -   Verify your FlutterFlow project configuration and that the secure token endpoint is correctly set up.
+---
 
-### ElevenLabs Resources
+## 🔒 Best practices for FlutterFlow builders
 
-  -   [API Documentation](https://elevenlabs.io/docs/conversational-ai/overview)
-  -   [Conversational AI v2 Blog Post](https://elevenlabs.io/blog/conversational-ai-v2)
-  -   [Agent Configuration Guide](https://elevenlabs.io/docs/conversational-ai/agents)
+### Do this
 
------
+- keep your API key on the backend only
+- store only the **Agent ID** and **token endpoint URL** in App State
+- use FlutterFlow API Calls for the token request
+- show UI feedback for connecting, speaking, recording, and errors
+- test microphone permissions on both Android and iOS
 
-**Ready to build amazing voice-enabled apps with FlutterFlow and ElevenLabs? Start with the marketplace integration or copy the custom code to get started\!** 🎉
+### Do not do this
+
+- do not paste your ElevenLabs API key into FlutterFlow
+- do not hardcode secrets into custom actions
+- do not rely on simulator testing for final audio validation
+- do not skip the backend token step
+
+---
+
+## 🧠 Why the marketplace version uses compatibility fixes internally
+
+FlutterFlow projects include internal package constraints that are not always compatible with the default dependency chain used by the public ElevenLabs Flutter SDK.
+
+This library includes the compatibility work needed to make the integration function cleanly in a FlutterFlow environment.
+
+As a FlutterFlow user, you do **not** need to manually manage those package-level fixes through the FlutterFlow interface. The important part for you is:
+
+- install from the Marketplace
+- configure App State
+- set up your token API call
+- wire the provided actions and widget into your page
+
+---
+
+## Troubleshooting
+
+| Problem | What to check in FlutterFlow |
+|---|---|
+| Conversation does not start | Confirm your token API call returns a valid `conversationToken` |
+| Permission error | Confirm microphone permissions are enabled in project settings and granted on device |
+| No transcript on iPhone simulator | Test on a physical device |
+| Agent does not respond | Confirm `elevenLabsAgentId` is correct |
+| UI never leaves loading state | Check whether `isInitializing` is being reset and whether the token call succeeded |
+| Connection drops | Check network conditions and show state from `wsConnectionState` in the UI |
+
+---
+
+## ElevenLabs resources
+
+- [Conversational AI Overview](https://elevenlabs.io/docs/conversational-ai/overview)
+- [Agent Configuration Guide](https://elevenlabs.io/docs/conversational-ai/agents)
+- [API Reference](https://elevenlabs.io/docs/api-reference)
+
+---
+
+## Final setup checklist
+
+Before you test, confirm all of the following:
+
+- Marketplace library added to your FlutterFlow project
+- ElevenLabs Agent created
+- backend token endpoint deployed
+- `elevenLabsAgentId` added to App State
+- `elevenLabsConversationTokenEndpoint` added to App State
+- token API Call created in FlutterFlow
+- page action flow wired for permission → token → initialize
+- recording widget added to the page
+- `stopConversationService` added on exit/dispose
+- tested on a real mobile device
+
+---
+
+Ready to build voice-native experiences in FlutterFlow.
