@@ -14,6 +14,9 @@ import 'index.dart'; // Imports other custom actions
 /// The endpoint should return either:
 /// - { "token": "..." } for the official ElevenLabs SDK
 /// - { "signedUrl": "..." } for legacy WebSocket connections (fallback)
+
+// You can clone the BuildShip template to use from: https://app.buildship.com/remix/2be7bf63-d0ec-4a47-941e-06ce2f24d42a?via=lb
+
 Future<String?> getSignedUrl(
   String agentId,
   String endpoint,

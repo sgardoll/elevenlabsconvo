@@ -459,8 +459,11 @@ class ElevenLabsSdkService extends ChangeNotifier {
     // and prevent it from responding again
     if (_client != null) {
       try {
+        _client!.removeListener(_onClientChanged);
         await _client!.endSession();
-        debugPrint('Conversation session ended');
+        _client!.dispose();
+        _client = null;
+        debugPrint('Conversation session ended and client disposed');
 
         // Update state
         _updateState(ConversationState.idle);

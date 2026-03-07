@@ -37,7 +37,7 @@ class _ConversationalDemoWidgetState extends State<ConversationalDemoWidget> {
       await requestPermission(bluetoothPermission);
       _model.initConvoAi = await actions.initializeConversationService(
         context,
-        FFAppState().agentId,
+        FFAppState().elevenLabsAgentId,
         FFAppState().endpoint,
       );
     });

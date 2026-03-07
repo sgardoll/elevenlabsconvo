@@ -1,4 +1,4 @@
-# Elevenlabs Conversational AI Library
+# ElevenLabs Conversational AI Library
 
 A new Flutter project.
 

@@ -20,11 +20,6 @@ class FFAppState extends ChangeNotifier {
   Future initializePersistedState() async {
     secureStorage = FlutterSecureStorage();
     await _safeInitAsync(() async {
-      _elevenLabsAgentId =
-          await secureStorage.getString('ff_elevenLabsAgentId') ??
-              _elevenLabsAgentId;
-    });
-    await _safeInitAsync(() async {
       _endpoint = await secureStorage.getString('ff_endpoint') ?? _endpoint;
     });
     await _safeInitAsync(() async {
@@ -44,7 +39,9 @@ class FFAppState extends ChangeNotifier {
               : _signedUrlExpirationTime;
     });
     await _safeInitAsync(() async {
-      _agentId = await secureStorage.getString('ff_agentId') ?? _agentId;
+      _elevenLabsAgentId =
+          await secureStorage.getString('ff_elevenLabsAgentId') ??
+              _elevenLabsAgentId;
     });
   }
 
@@ -94,17 +91,6 @@ class FFAppState extends ChangeNotifier {
   String get wsConnectionState => _wsConnectionState;
   set wsConnectionState(String value) {
     _wsConnectionState = value;
-  }
-
-  String _elevenLabsAgentId = '';
-  String get elevenLabsAgentId => _elevenLabsAgentId;
-  set elevenLabsAgentId(String value) {
-    _elevenLabsAgentId = value;
-    secureStorage.setString('ff_elevenLabsAgentId', value);
-  }
-
-  void deleteElevenLabsAgentId() {
-    secureStorage.delete(key: 'ff_elevenLabsAgentId');
   }
 
   bool _isRecording = false;
@@ -196,15 +182,15 @@ class FFAppState extends ChangeNotifier {
     _lastSignedUrl = value;
   }
 
-  String _agentId = '';
-  String get agentId => _agentId;
-  set agentId(String value) {
-    _agentId = value;
-    secureStorage.setString('ff_agentId', value);
+  String _elevenLabsAgentId = '';
+  String get elevenLabsAgentId => _elevenLabsAgentId;
+  set elevenLabsAgentId(String value) {
+    _elevenLabsAgentId = value;
+    secureStorage.setString('ff_elevenLabsAgentId', value);
   }
 
-  void deleteAgentId() {
-    secureStorage.delete(key: 'ff_agentId');
+  void deleteElevenLabsAgentId() {
+    secureStorage.delete(key: 'ff_elevenLabsAgentId');
   }
 }
 
