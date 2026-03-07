@@ -20,11 +20,6 @@ class FFAppState extends ChangeNotifier {
   Future initializePersistedState() async {
     secureStorage = FlutterSecureStorage();
     await _safeInitAsync(() async {
-      _elevenLabsAgentId =
-          await secureStorage.getString('ff_elevenLabsAgentId') ??
-              _elevenLabsAgentId;
-    });
-    await _safeInitAsync(() async {
       _endpoint = await secureStorage.getString('ff_endpoint') ?? _endpoint;
     });
     await _safeInitAsync(() async {
@@ -42,6 +37,11 @@ class FFAppState extends ChangeNotifier {
               ? DateTime.fromMillisecondsSinceEpoch(
                   (await secureStorage.getInt('ff_signedUrlExpirationTime'))!)
               : _signedUrlExpirationTime;
+    });
+    await _safeInitAsync(() async {
+      _elevenLabsAgentId =
+          await secureStorage.getString('ff_elevenLabsAgentId') ??
+              _elevenLabsAgentId;
     });
   }
 
@@ -91,17 +91,6 @@ class FFAppState extends ChangeNotifier {
   String get wsConnectionState => _wsConnectionState;
   set wsConnectionState(String value) {
     _wsConnectionState = value;
-  }
-
-  String _elevenLabsAgentId = '';
-  String get elevenLabsAgentId => _elevenLabsAgentId;
-  set elevenLabsAgentId(String value) {
-    _elevenLabsAgentId = value;
-    secureStorage.setString('ff_elevenLabsAgentId', value);
-  }
-
-  void deleteElevenLabsAgentId() {
-    secureStorage.delete(key: 'ff_elevenLabsAgentId');
   }
 
   bool _isRecording = false;
@@ -155,6 +144,53 @@ class FFAppState extends ChangeNotifier {
 
   void deleteSignedUrlExpirationTime() {
     secureStorage.delete(key: 'ff_signedUrlExpirationTime');
+  }
+
+  bool _isInConversation = false;
+  bool get isInConversation => _isInConversation;
+  set isInConversation(bool value) {
+    _isInConversation = value;
+  }
+
+  bool _isAgentSpeaking = false;
+  bool get isAgentSpeaking => _isAgentSpeaking;
+  set isAgentSpeaking(bool value) {
+    _isAgentSpeaking = value;
+  }
+
+  String _lastUserTranscript = '';
+  String get lastUserTranscript => _lastUserTranscript;
+  set lastUserTranscript(String value) {
+    _lastUserTranscript = value;
+  }
+
+  String _lastAgentResponse = '';
+  String get lastAgentResponse => _lastAgentResponse;
+  set lastAgentResponse(String value) {
+    _lastAgentResponse = value;
+  }
+
+  double _lastVadScore = 0.0;
+  double get lastVadScore => _lastVadScore;
+  set lastVadScore(double value) {
+    _lastVadScore = value;
+  }
+
+  String _lastSignedUrl = '';
+  String get lastSignedUrl => _lastSignedUrl;
+  set lastSignedUrl(String value) {
+    _lastSignedUrl = value;
+  }
+
+  String _elevenLabsAgentId = '';
+  String get elevenLabsAgentId => _elevenLabsAgentId;
+  set elevenLabsAgentId(String value) {
+    _elevenLabsAgentId = value;
+    secureStorage.setString('ff_elevenLabsAgentId', value);
+  }
+
+  void deleteElevenLabsAgentId() {
+    secureStorage.delete(key: 'ff_elevenLabsAgentId');
   }
 }
 

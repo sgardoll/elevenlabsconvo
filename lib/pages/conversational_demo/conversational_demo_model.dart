@@ -1,4 +1,4 @@
-import '/components/transcription_bubbles_widget.dart';
+import '/components/transcription_bubbles/transcription_bubbles_widget.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import 'conversational_demo_widget.dart' show ConversationalDemoWidget;
 import 'package:flutter/material.dart';

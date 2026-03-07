@@ -5,8 +5,8 @@ import '/backend/schema/util/schema_util.dart';
 import 'index.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 
-class ElevenlabsResponseStruct extends BaseStruct {
-  ElevenlabsResponseStruct({
+class ElevenResponseStruct extends BaseStruct {
+  ElevenResponseStruct({
     String? type,
     String? content,
     int? timestamp,
@@ -37,15 +37,15 @@ class ElevenlabsResponseStruct extends BaseStruct {
 
   bool hasTimestamp() => _timestamp != null;
 
-  static ElevenlabsResponseStruct fromMap(Map<String, dynamic> data) =>
-      ElevenlabsResponseStruct(
+  static ElevenResponseStruct fromMap(Map<String, dynamic> data) =>
+      ElevenResponseStruct(
         type: data['type'] as String?,
         content: data['content'] as String?,
         timestamp: castToType<int>(data['timestamp']),
       );
 
-  static ElevenlabsResponseStruct? maybeFromMap(dynamic data) => data is Map
-      ? ElevenlabsResponseStruct.fromMap(data.cast<String, dynamic>())
+  static ElevenResponseStruct? maybeFromMap(dynamic data) => data is Map
+      ? ElevenResponseStruct.fromMap(data.cast<String, dynamic>())
       : null;
 
   Map<String, dynamic> toMap() => {
@@ -70,9 +70,8 @@ class ElevenlabsResponseStruct extends BaseStruct {
         ),
       }.withoutNulls;
 
-  static ElevenlabsResponseStruct fromSerializableMap(
-          Map<String, dynamic> data) =>
-      ElevenlabsResponseStruct(
+  static ElevenResponseStruct fromSerializableMap(Map<String, dynamic> data) =>
+      ElevenResponseStruct(
         type: deserializeParam(
           data['type'],
           ParamType.String,
@@ -91,11 +90,11 @@ class ElevenlabsResponseStruct extends BaseStruct {
       );
 
   @override
-  String toString() => 'ElevenlabsResponseStruct(${toMap()})';
+  String toString() => 'ElevenResponseStruct(${toMap()})';
 
   @override
   bool operator ==(Object other) {
-    return other is ElevenlabsResponseStruct &&
+    return other is ElevenResponseStruct &&
         type == other.type &&
         content == other.content &&
         timestamp == other.timestamp;
@@ -105,12 +104,12 @@ class ElevenlabsResponseStruct extends BaseStruct {
   int get hashCode => const ListEquality().hash([type, content, timestamp]);
 }
 
-ElevenlabsResponseStruct createElevenlabsResponseStruct({
+ElevenResponseStruct createElevenResponseStruct({
   String? type,
   String? content,
   int? timestamp,
 }) =>
-    ElevenlabsResponseStruct(
+    ElevenResponseStruct(
       type: type,
       content: content,
       timestamp: timestamp,

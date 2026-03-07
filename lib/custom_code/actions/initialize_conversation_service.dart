@@ -7,6 +7,8 @@ import 'package:flutter/material.dart';
 // Begin custom action code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
+import 'index.dart'; // Imports other custom actions
+
 import '/custom_code/elevenlabs_sdk_service.dart';
 
 /// Initialize the ElevenLabs SDK Conversation Service
@@ -20,7 +22,8 @@ Future<String> initializeConversationService(
     debugPrint('Initializing ElevenLabs SDK Conversation Service');
 
     final service = ElevenLabsSdkService();
-    final result = await service.initialize(agentId: agentId, endpoint: endpoint);
+    final result =
+        await service.initialize(agentId: agentId, endpoint: endpoint);
 
     debugPrint('Service initialization result: $result');
     return result;
