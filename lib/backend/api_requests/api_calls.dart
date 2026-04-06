@@ -24,8 +24,9 @@ class GetSignedURLViaBuildShipCallCall {
       headers: {
         'Content-Type': 'application/json',
       },
-      params: {},
-      body: ffApiRequestBody,
+      params: {
+        'agentId': agentId,
+      },
       bodyType: BodyType.JSON,
       returnBody: true,
       encodeBodyUtf8: false,
