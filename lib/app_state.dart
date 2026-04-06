@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import '/backend/schema/structs/index.dart';
+import '/backend/api_requests/api_manager.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:csv/csv.dart';
 import 'package:synchronized/synchronized.dart';
 import 'flutter_flow/flutter_flow_util.dart';
+import 'dart:convert';
 
 class FFAppState extends ChangeNotifier {
   static FFAppState _instance = FFAppState._internal();
@@ -52,10 +55,15 @@ class FFAppState extends ChangeNotifier {
 
   late FlutterSecureStorage secureStorage;
 
-  List<dynamic> _conversationMessages = [];
-  List<dynamic> get conversationMessages => _conversationMessages;
+  late LoggableList<dynamic> _conversationMessages = LoggableList([]);
+  List<dynamic> get conversationMessages =>
+      _conversationMessages?..logger = () => debugLogAppState(this);
   set conversationMessages(List<dynamic> value) {
-    _conversationMessages = value;
+    if (value != null) {
+      _conversationMessages = LoggableList(value);
+    }
+
+    debugLogAppState(this);
   }
 
   void addToConversationMessages(dynamic value) {
@@ -85,18 +93,24 @@ class FFAppState extends ChangeNotifier {
   String get lastAudioResponse => _lastAudioResponse;
   set lastAudioResponse(String value) {
     _lastAudioResponse = value;
+
+    debugLogAppState(this);
   }
 
   String _wsConnectionState = 'disconnected';
   String get wsConnectionState => _wsConnectionState;
   set wsConnectionState(String value) {
     _wsConnectionState = value;
+
+    debugLogAppState(this);
   }
 
   bool _isRecording = false;
   bool get isRecording => _isRecording;
   set isRecording(bool value) {
     _isRecording = value;
+
+    debugLogAppState(this);
   }
 
   String _endpoint = '';
@@ -104,6 +118,7 @@ class FFAppState extends ChangeNotifier {
   set endpoint(String value) {
     _endpoint = value;
     secureStorage.setString('ff_endpoint', value);
+    debugLogAppState(this);
   }
 
   void deleteEndpoint() {
@@ -115,6 +130,7 @@ class FFAppState extends ChangeNotifier {
   set isSignedUrlExpired(bool value) {
     _isSignedUrlExpired = value;
     secureStorage.setBool('ff_isSignedUrlExpired', value);
+    debugLogAppState(this);
   }
 
   void deleteIsSignedUrlExpired() {
@@ -126,6 +142,7 @@ class FFAppState extends ChangeNotifier {
   set cachedSignedUrl(String value) {
     _cachedSignedUrl = value;
     secureStorage.setString('ff_cachedSignedUrl', value);
+    debugLogAppState(this);
   }
 
   void deleteCachedSignedUrl() {
@@ -140,6 +157,7 @@ class FFAppState extends ChangeNotifier {
         ? secureStorage.setInt(
             'ff_signedUrlExpirationTime', value.millisecondsSinceEpoch)
         : secureStorage.remove('ff_signedUrlExpirationTime');
+    debugLogAppState(this);
   }
 
   void deleteSignedUrlExpirationTime() {
@@ -150,36 +168,48 @@ class FFAppState extends ChangeNotifier {
   bool get isInConversation => _isInConversation;
   set isInConversation(bool value) {
     _isInConversation = value;
+
+    debugLogAppState(this);
   }
 
   bool _isAgentSpeaking = false;
   bool get isAgentSpeaking => _isAgentSpeaking;
   set isAgentSpeaking(bool value) {
     _isAgentSpeaking = value;
+
+    debugLogAppState(this);
   }
 
   String _lastUserTranscript = '';
   String get lastUserTranscript => _lastUserTranscript;
   set lastUserTranscript(String value) {
     _lastUserTranscript = value;
+
+    debugLogAppState(this);
   }
 
   String _lastAgentResponse = '';
   String get lastAgentResponse => _lastAgentResponse;
   set lastAgentResponse(String value) {
     _lastAgentResponse = value;
+
+    debugLogAppState(this);
   }
 
   double _lastVadScore = 0.0;
   double get lastVadScore => _lastVadScore;
   set lastVadScore(double value) {
     _lastVadScore = value;
+
+    debugLogAppState(this);
   }
 
   String _lastSignedUrl = '';
   String get lastSignedUrl => _lastSignedUrl;
   set lastSignedUrl(String value) {
     _lastSignedUrl = value;
+
+    debugLogAppState(this);
   }
 
   String _elevenLabsAgentId = '';
@@ -187,11 +217,166 @@ class FFAppState extends ChangeNotifier {
   set elevenLabsAgentId(String value) {
     _elevenLabsAgentId = value;
     secureStorage.setString('ff_elevenLabsAgentId', value);
+    debugLogAppState(this);
   }
 
   void deleteElevenLabsAgentId() {
     secureStorage.delete(key: 'ff_elevenLabsAgentId');
   }
+
+  Map<String, DebugDataField> toDebugSerializableMap() => {
+        'conversationMessages': debugSerializeParam(
+          conversationMessages,
+          ParamType.JSON,
+          isList: true,
+          link:
+              'https://beta.flutterflow.io/project/elevenlabs-conversational2-x2dkep?tab=appValues&appValuesTab=state',
+          searchReference:
+              'reference=CioKIAoUY29udmVyc2F0aW9uTWVzc2FnZXMSCDFkOTN3OHpncgQSAggJegBaFGNvbnZlcnNhdGlvbk1lc3NhZ2Vz',
+          name: 'dynamic',
+          nullable: false,
+        ),
+        'lastAudioResponse': debugSerializeParam(
+          lastAudioResponse,
+          ParamType.String,
+          link:
+              'https://beta.flutterflow.io/project/elevenlabs-conversational2-x2dkep?tab=appValues&appValuesTab=state',
+          searchReference:
+              'reference=CiUKHQoRbGFzdEF1ZGlvUmVzcG9uc2USCDdrOTJlZTM2cgIIA3oAWhFsYXN0QXVkaW9SZXNwb25zZQ==',
+          name: 'String',
+          nullable: false,
+        ),
+        'wsConnectionState': debugSerializeParam(
+          wsConnectionState,
+          ParamType.String,
+          link:
+              'https://beta.flutterflow.io/project/elevenlabs-conversational2-x2dkep?tab=appValues&appValuesTab=state',
+          searchReference:
+              'reference=CiUKHQoRd3NDb25uZWN0aW9uU3RhdGUSCGUwMnJ5aG5kcgIIA3oAWhF3c0Nvbm5lY3Rpb25TdGF0ZQ==',
+          name: 'String',
+          nullable: false,
+        ),
+        'isRecording': debugSerializeParam(
+          isRecording,
+          ParamType.bool,
+          link:
+              'https://beta.flutterflow.io/project/elevenlabs-conversational2-x2dkep?tab=appValues&appValuesTab=state',
+          searchReference:
+              'reference=Ch8KFwoLaXNSZWNvcmRpbmcSCG9razcxN2g5cgIIBXoAWgtpc1JlY29yZGluZw==',
+          name: 'bool',
+          nullable: false,
+        ),
+        'endpoint': debugSerializeParam(
+          endpoint,
+          ParamType.String,
+          link:
+              'https://beta.flutterflow.io/project/elevenlabs-conversational2-x2dkep?tab=appValues&appValuesTab=state',
+          searchReference:
+              'reference=ChwKFAoIZW5kcG9pbnQSCGg2eDNpY2hycgIIA3oAWghlbmRwb2ludA==',
+          name: 'String',
+          nullable: false,
+        ),
+        'isSignedUrlExpired': debugSerializeParam(
+          isSignedUrlExpired,
+          ParamType.bool,
+          link:
+              'https://beta.flutterflow.io/project/elevenlabs-conversational2-x2dkep?tab=appValues&appValuesTab=state',
+          searchReference:
+              'reference=CiYKHgoSaXNTaWduZWRVcmxFeHBpcmVkEghtNDkxaGhwOXICCAV6AFoSaXNTaWduZWRVcmxFeHBpcmVk',
+          name: 'bool',
+          nullable: false,
+        ),
+        'cachedSignedUrl': debugSerializeParam(
+          cachedSignedUrl,
+          ParamType.String,
+          link:
+              'https://beta.flutterflow.io/project/elevenlabs-conversational2-x2dkep?tab=appValues&appValuesTab=state',
+          searchReference:
+              'reference=CiMKGwoPY2FjaGVkU2lnbmVkVXJsEgg0cW01MmxmdXICCAN6AFoPY2FjaGVkU2lnbmVkVXJs',
+          name: 'String',
+          nullable: false,
+        ),
+        'signedUrlExpirationTime': debugSerializeParam(
+          signedUrlExpirationTime,
+          ParamType.DateTime,
+          link:
+              'https://beta.flutterflow.io/project/elevenlabs-conversational2-x2dkep?tab=appValues&appValuesTab=state',
+          searchReference:
+              'reference=CkwKIwoXc2lnbmVkVXJsRXhwaXJhdGlvblRpbWUSCDZvc3VqNnR4ciMICCofOh0KE0NvbnZlcnNhdGlvblNlcnZpY2UiBjFuYnU4MnoAWhdzaWduZWRVcmxFeHBpcmF0aW9uVGltZQ==',
+          name: 'DateTime',
+          nullable: false,
+        ),
+        'isInConversation': debugSerializeParam(
+          isInConversation,
+          ParamType.bool,
+          link:
+              'https://beta.flutterflow.io/project/elevenlabs-conversational2-x2dkep?tab=appValues&appValuesTab=state',
+          searchReference:
+              'reference=CiQKHAoQaXNJbkNvbnZlcnNhdGlvbhIIem1hZ2dwNHZyAggFegBaEGlzSW5Db252ZXJzYXRpb24=',
+          name: 'bool',
+          nullable: false,
+        ),
+        'isAgentSpeaking': debugSerializeParam(
+          isAgentSpeaking,
+          ParamType.bool,
+          link:
+              'https://beta.flutterflow.io/project/elevenlabs-conversational2-x2dkep?tab=appValues&appValuesTab=state',
+          searchReference:
+              'reference=CiMKGwoPaXNBZ2VudFNwZWFraW5nEghtejg3NG56eHICCAV6AFoPaXNBZ2VudFNwZWFraW5n',
+          name: 'bool',
+          nullable: false,
+        ),
+        'lastUserTranscript': debugSerializeParam(
+          lastUserTranscript,
+          ParamType.String,
+          link:
+              'https://beta.flutterflow.io/project/elevenlabs-conversational2-x2dkep?tab=appValues&appValuesTab=state',
+          searchReference:
+              'reference=CiYKHgoSbGFzdFVzZXJUcmFuc2NyaXB0EghhZG00Zm92ZHICCAN6AFoSbGFzdFVzZXJUcmFuc2NyaXB0',
+          name: 'String',
+          nullable: false,
+        ),
+        'lastAgentResponse': debugSerializeParam(
+          lastAgentResponse,
+          ParamType.String,
+          link:
+              'https://beta.flutterflow.io/project/elevenlabs-conversational2-x2dkep?tab=appValues&appValuesTab=state',
+          searchReference:
+              'reference=CiUKHQoRbGFzdEFnZW50UmVzcG9uc2USCHk3YjBydGpscgIIA3oAWhFsYXN0QWdlbnRSZXNwb25zZQ==',
+          name: 'String',
+          nullable: false,
+        ),
+        'lastVadScore': debugSerializeParam(
+          lastVadScore,
+          ParamType.double,
+          link:
+              'https://beta.flutterflow.io/project/elevenlabs-conversational2-x2dkep?tab=appValues&appValuesTab=state',
+          searchReference:
+              'reference=CiAKGAoMbGFzdFZhZFNjb3JlEggxaTJvMGxmdXICCAJ6AFoMbGFzdFZhZFNjb3Jl',
+          name: 'double',
+          nullable: false,
+        ),
+        'lastSignedUrl': debugSerializeParam(
+          lastSignedUrl,
+          ParamType.String,
+          link:
+              'https://beta.flutterflow.io/project/elevenlabs-conversational2-x2dkep?tab=appValues&appValuesTab=state',
+          searchReference:
+              'reference=CiEKGQoNbGFzdFNpZ25lZFVybBIINDZlN3V5b3FyAggDegBaDWxhc3RTaWduZWRVcmw=',
+          name: 'String',
+          nullable: false,
+        ),
+        'elevenLabsAgentId': debugSerializeParam(
+          elevenLabsAgentId,
+          ParamType.String,
+          link:
+              'https://beta.flutterflow.io/project/elevenlabs-conversational2-x2dkep?tab=appValues&appValuesTab=state',
+          searchReference:
+              'reference=CiUKHQoRZWxldmVuTGFic0FnZW50SWQSCHFlM2RlaHI2cgIIA3oAWhFlbGV2ZW5MYWJzQWdlbnRJZA==',
+          name: 'String',
+          nullable: false,
+        )
+      };
 }
 
 void _safeInit(Function() initializeField) {
