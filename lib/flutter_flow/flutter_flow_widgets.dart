@@ -363,6 +363,27 @@ class _FFFocusIndicatorState extends State<FFFocusIndicator> {
 
   void _onFocusChange() {
     if (mounted) {
+      if (_focusNode.hasFocus) {
+        // No single ScrollPositionAlignmentPolicy scrolls in both directions.
+        // keepVisibleAtEnd scrolls DOWN (handles Shift+Tab wrap first → last).
+        // keepVisibleAtStart scrolls UP (handles Tab wrap last → first).
+        // Each is a no-op when the widget is already visible. We call
+        // keepVisibleAtEnd first so that keepVisibleAtStart gets the final
+        // say — ensuring the top of the widget is shown when it's taller
+        // than the viewport.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _focusNode.hasFocus) {
+            Scrollable.ensureVisible(
+              context,
+              alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+            );
+            Scrollable.ensureVisible(
+              context,
+              alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtStart,
+            );
+          }
+        });
+      }
       setState(() {
         _hasFocus = _focusNode.hasFocus;
       });
@@ -398,7 +419,7 @@ class _FFFocusIndicatorState extends State<FFFocusIndicator> {
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
-      padding: widget.padding,
+      padding: _hasFocus ? widget.padding : null,
       decoration: BoxDecoration(
         border: _hasFocus ? widget.border : null,
         borderRadius: widget.borderRadius ?? BorderRadius.circular(4),
