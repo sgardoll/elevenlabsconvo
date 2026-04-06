@@ -99,7 +99,8 @@ class FFAppState extends ChangeNotifier {
     _isRecording = value;
   }
 
-  String _endpoint = '';
+  String _endpoint =
+      'https://4tgke4.buildship.run/elevenLabsSignedToken-b81a7527400f';
   String get endpoint => _endpoint;
   set endpoint(String value) {
     _endpoint = value;
@@ -182,7 +183,7 @@ class FFAppState extends ChangeNotifier {
     _lastSignedUrl = value;
   }
 
-  String _elevenLabsAgentId = '';
+  String _elevenLabsAgentId = 'agent_1801kn0hvbh2fxh99vct102agv7s';
   String get elevenLabsAgentId => _elevenLabsAgentId;
   set elevenLabsAgentId(String value) {
     _elevenLabsAgentId = value;
