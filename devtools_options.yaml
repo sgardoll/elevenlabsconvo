@@ -1,4 +1,0 @@
-description: DevTools extension for FlutterFlow Debug Panel
-documentation: https://docs.flutterflow.io
-extensions:
-  - flutterflow_debug_panel: true

@@ -17,30 +17,21 @@ class ElevenResponseStruct extends BaseStruct {
   // "type" field.
   String? _type;
   String get type => _type ?? '';
-  set type(String? val) {
-    _type = val;
-    debugLog();
-  }
+  set type(String? val) => _type = val;
 
   bool hasType() => _type != null;
 
   // "content" field.
   String? _content;
   String get content => _content ?? '';
-  set content(String? val) {
-    _content = val;
-    debugLog();
-  }
+  set content(String? val) => _content = val;
 
   bool hasContent() => _content != null;
 
   // "timestamp" field.
   int? _timestamp;
   int get timestamp => _timestamp ?? 0;
-  set timestamp(int? val) {
-    _timestamp = val;
-    debugLog();
-  }
+  set timestamp(int? val) => _timestamp = val;
 
   void incrementTimestamp(int amount) => timestamp = timestamp + amount;
 
@@ -97,27 +88,6 @@ class ElevenResponseStruct extends BaseStruct {
           false,
         ),
       );
-  @override
-  Map<String, DebugDataField> toDebugSerializableMap() => {
-        'type': debugSerializeParam(
-          type,
-          ParamType.String,
-          name: 'String',
-          nullable: false,
-        ),
-        'content': debugSerializeParam(
-          content,
-          ParamType.String,
-          name: 'String',
-          nullable: false,
-        ),
-        'timestamp': debugSerializeParam(
-          timestamp,
-          ParamType.int,
-          name: 'int',
-          nullable: false,
-        ),
-      };
 
   @override
   String toString() => 'ElevenResponseStruct(${toMap()})';

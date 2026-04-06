@@ -1,10 +1,7 @@
 import 'dart:convert';
-import 'dart:typed_data';
-import '../schema/structs/index.dart';
 
 import 'package:flutter/foundation.dart';
 
-import '/flutter_flow/flutter_flow_util.dart';
 import 'api_manager.dart';
 
 export 'api_manager.dart' show ApiCallResponse;
@@ -16,15 +13,20 @@ class GetSignedURLViaBuildShipCallCall {
     String? agentId = '',
     String? endpoint = '',
   }) async {
+    final ffApiRequestBody = '''
+{
+  "agentId": "${escapeStringForJson(agentId)}"
+}''';
     return ApiManager.instance.makeApiCall(
       callName: 'GetSignedURLViaBuildShipCall',
       apiUrl: '${endpoint}',
-      callType: ApiCallType.GET,
-      headers: {},
-      params: {
-        'agentId': agentId,
-        'endpoint': endpoint,
+      callType: ApiCallType.POST,
+      headers: {
+        'Content-Type': 'application/json',
       },
+      params: {},
+      body: ffApiRequestBody,
+      bodyType: BodyType.JSON,
       returnBody: true,
       encodeBodyUtf8: false,
       decodeUtf8: false,
@@ -77,4 +79,15 @@ String _serializeJson(dynamic jsonVar, [bool isList = false]) {
     }
     return isList ? '[]' : '{}';
   }
+}
+
+String? escapeStringForJson(String? input) {
+  if (input == null) {
+    return null;
+  }
+  return input
+      .replaceAll('\\', '\\\\')
+      .replaceAll('"', '\\"')
+      .replaceAll('\n', '\\n')
+      .replaceAll('\t', '\\t');
 }

@@ -2,7 +2,6 @@ import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
-import 'flutter_flow_util.dart';
 
 Widget wrapWithModel<T extends FlutterFlowModel>({
   required T model,
@@ -91,15 +90,6 @@ abstract class FlutterFlowModel<W extends Widget> {
     callback();
     _updateCallback();
   }
-
-  FlutterFlowModel get rootModel => context != null
-      ? DebugFlutterFlowModelContext.maybeOf(context!)?.rootModel ?? this
-      : this;
-  WidgetClassDebugData toWidgetClassDebugData() => WidgetClassDebugData();
-
-  bool? _isRouteVisible;
-  bool get isRouteVisible => rootModel._isRouteVisible ?? false;
-  set isRouteVisible(bool? value) => _isRouteVisible = value;
 }
 
 class FlutterFlowDynamicModels<T extends FlutterFlowModel> {
@@ -162,14 +152,6 @@ class FlutterFlowDynamicModels<T extends FlutterFlowModel> {
       });
     }
   }
-
-  DynamicWidgetClassDebugData toDynamicWidgetClassDebugData() =>
-      DynamicWidgetClassDebugData(
-        componentStates: _childrenModels
-            .map((key, value) =>
-                MapEntry('Key(${key})', value.toWidgetClassDebugData()))
-            .entries,
-      );
 }
 
 T? _getDefaultValue<T>() {

@@ -1,12 +1,9 @@
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
-import '/flutter_flow/flutter_flow_widgets.dart';
-import 'dart:ui';
 import '/backend/schema/structs/index.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:provider/provider.dart';
 import 'transcription_bubbles_model.dart';
 export 'transcription_bubbles_model.dart';
 
@@ -31,8 +28,8 @@ class TranscriptionBubblesWidget extends StatefulWidget {
       _TranscriptionBubblesWidgetState();
 }
 
-class _TranscriptionBubblesWidgetState extends State<TranscriptionBubblesWidget>
-    with RouteAware {
+class _TranscriptionBubblesWidgetState
+    extends State<TranscriptionBubblesWidget> {
   late TranscriptionBubblesModel _model;
 
   @override
@@ -54,61 +51,13 @@ class _TranscriptionBubblesWidgetState extends State<TranscriptionBubblesWidget>
 
   @override
   void dispose() {
-    routeObserver.unsubscribe(this);
-
     _model.maybeDispose();
 
     super.dispose();
   }
 
   @override
-  void didUpdateWidget(TranscriptionBubblesWidget oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    _model.widget = widget;
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final route = DebugModalRoute.of(context);
-    if (route != null) {
-      routeObserver.subscribe(this, route);
-    }
-    debugLogGlobalProperty(context);
-  }
-
-  @override
-  void didPopNext() {
-    if (mounted && DebugFlutterFlowModelContext.maybeOf(context) == null) {
-      setState(() => _model.isRouteVisible = true);
-      debugLogWidgetClass(_model);
-    }
-  }
-
-  @override
-  void didPush() {
-    if (mounted && DebugFlutterFlowModelContext.maybeOf(context) == null) {
-      setState(() => _model.isRouteVisible = true);
-      debugLogWidgetClass(_model);
-    }
-  }
-
-  @override
-  void didPop() {
-    _model.isRouteVisible = false;
-  }
-
-  @override
-  void didPushNext() {
-    _model.isRouteVisible = false;
-  }
-
-  @override
   Widget build(BuildContext context) {
-    DebugFlutterFlowModelContext.maybeOf(context)
-        ?.parentModelCallback
-        ?.call(_model);
-
     return Container(
       decoration: BoxDecoration(
         color: Colors.transparent,
@@ -119,7 +68,7 @@ class _TranscriptionBubblesWidgetState extends State<TranscriptionBubblesWidget>
           mainAxisSize: MainAxisSize.min,
           children: [
             if (valueOrDefault<bool>(
-              ElevenResponseStruct.maybeFromMap(widget!.jsonResponse)?.type ==
+              ElevenResponseStruct.maybeFromMap(widget.jsonResponse)?.type ==
                   'agent',
               false,
             ))
@@ -169,7 +118,7 @@ class _TranscriptionBubblesWidgetState extends State<TranscriptionBubblesWidget>
                                     alignment: AlignmentDirectional(0.0, 0.0),
                                     image: Image.network(
                                       valueOrDefault<String>(
-                                        widget!.agentImage,
+                                        widget.agentImage,
                                         'https://storage.googleapis.com/flutterflow-io-6f20.appspot.com/projects/elevenlabs-conversational2-x2dkep/assets/87a4tp9woym0/11.png',
                                       ),
                                     ).image,
@@ -178,7 +127,7 @@ class _TranscriptionBubblesWidgetState extends State<TranscriptionBubblesWidget>
                                 ),
                               ),
                               Text(
-                                widget!.agentName,
+                                widget.agentName,
                                 style: FlutterFlowTheme.of(context)
                                     .labelSmall
                                     .override(
@@ -205,7 +154,7 @@ class _TranscriptionBubblesWidgetState extends State<TranscriptionBubblesWidget>
                           ),
                           Text(
                             getJsonField(
-                              widget!.jsonResponse,
+                              widget.jsonResponse,
                               r'''$.content''',
                             ).toString(),
                             style: FlutterFlowTheme.of(context)
@@ -235,7 +184,7 @@ class _TranscriptionBubblesWidgetState extends State<TranscriptionBubblesWidget>
                 ],
               ),
             if (valueOrDefault<bool>(
-              ElevenResponseStruct.maybeFromMap(widget!.jsonResponse)?.type ==
+              ElevenResponseStruct.maybeFromMap(widget.jsonResponse)?.type ==
                   'user',
               false,
             ))
@@ -298,7 +247,7 @@ class _TranscriptionBubblesWidgetState extends State<TranscriptionBubblesWidget>
                           ),
                           Text(
                             getJsonField(
-                              widget!.jsonResponse,
+                              widget.jsonResponse,
                               r'''$.content''',
                             ).toString(),
                             textAlign: TextAlign.end,
