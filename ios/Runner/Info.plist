@@ -56,6 +56,37 @@
       <string>voip</string>
     </array>
     <!-- End of UIBackgroundModes -->
+    <!-- Start of CADisableMinimumFrameDurationOnPhone -->
+    <key>CADisableMinimumFrameDurationOnPhone</key>
+    <true/>
+    <!-- End of CADisableMinimumFrameDurationOnPhone -->
+    <!-- Start of UIApplicationSupportsIndirectInputEvents -->
+    <key>UIApplicationSupportsIndirectInputEvents</key>
+    <true/>
+    <!-- End of UIApplicationSupportsIndirectInputEvents -->
+    <!-- Start of UIApplicationSceneManifest -->
+    <key>UIApplicationSceneManifest</key>
+    <dict>
+      <key>UIApplicationSupportsMultipleScenes</key>
+      <false/>
+      <key>UISceneConfigurations</key>
+      <dict>
+        <key>UIWindowSceneSessionRoleApplication</key>
+        <array>
+          <dict>
+            <key>UISceneClassName</key>
+            <string>UIWindowScene</string>
+            <key>UISceneConfigurationName</key>
+            <string>flutter</string>
+            <key>UISceneDelegateClassName</key>
+            <string>FlutterSceneDelegate</string>
+            <key>UISceneStoryboardFile</key>
+            <string>Main</string>
+          </dict>
+        </array>
+      </dict>
+    </dict>
+    <!-- End of UIApplicationSceneManifest -->
     <key>UILaunchStoryboardName</key>
     <string>LaunchScreen</string>
     <key>UIMainStoryboardFile</key>

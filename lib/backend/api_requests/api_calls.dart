@@ -13,6 +13,10 @@ class GetSignedURLViaBuildShipCallCall {
     String? agentId = '',
     String? endpoint = '',
   }) async {
+    final ffApiRequestBody = '''
+{
+  "agentId": "${escapeStringForJson(agentId)}"
+}''';
     return ApiManager.instance.makeApiCall(
       callName: 'GetSignedURLViaBuildShipCall',
       apiUrl: '${endpoint}',
@@ -76,4 +80,15 @@ String _serializeJson(dynamic jsonVar, [bool isList = false]) {
     }
     return isList ? '[]' : '{}';
   }
+}
+
+String? escapeStringForJson(String? input) {
+  if (input == null) {
+    return null;
+  }
+  return input
+      .replaceAll('\\', '\\\\')
+      .replaceAll('"', '\\"')
+      .replaceAll('\n', '\\n')
+      .replaceAll('\t', '\\t');
 }
