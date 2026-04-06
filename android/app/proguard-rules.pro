@@ -8,6 +8,9 @@
 -dontwarn javax.annotation.concurrent.GuardedBy
 -dontwarn org.bouncycastle.jce.provider.BouncyCastleProvider
 -dontwarn org.bouncycastle.pqc.jcajce.provider.BouncyCastlePQCProvider
+-dontwarn com.fasterxml.jackson.core.**
+-dontwarn com.fasterxml.jackson.databind.**
+-dontwarn com.google.auto.value.**
 -keep class org.xmlpull.v1.** { *; }
 
 
