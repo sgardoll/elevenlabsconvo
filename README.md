@@ -91,8 +91,9 @@ The easiest low-code pattern is:
 
 - **FlutterFlow** → sends request to your backend
 - **BuildShip** → uses your ElevenLabs API key securely
-- **BuildShip** → returns a temporary `conversationToken`
-- **FlutterFlow** → starts the conversation using that token
+- **BuildShip** → returns a temporary token response (`token`, optionally with `signedUrl`)
+- **FlutterFlow** → passes your agent ID and backend endpoint into the library
+- **The library** → fetches the token and starts the conversation internally
 
 ---
 
@@ -116,7 +117,29 @@ Use a backend platform such as **BuildShip** to create an endpoint that:
 
 - accepts your `agentId`
 - uses your secret ElevenLabs API key on the server
-- returns a temporary **conversation token**
+- returns a temporary **conversation token** payload the library can read
+
+### Supported response formats
+
+The current library implementation accepts either of these backend response shapes:
+
+```json
+{
+  "token": "your-temporary-token"
+}
+```
+
+or:
+
+```json
+{
+  "signedUrl": "wss://api.elevenlabs.io/...",
+  "token": "your-temporary-token"
+}
+```
+
+`token` is the field the current implementation uses for the ElevenLabs SDK session.
+`signedUrl` may also be present for compatibility/debugging, but it is not required when `token` is returned.
 
 ### Important
 
@@ -155,17 +178,19 @@ In FlutterFlow, go to **App State** and add these variables.
 
 ---
 
-## Step 4: Add your API Call in FlutterFlow
+## Step 4: Configure your backend endpoint value in FlutterFlow
 
-In FlutterFlow, create an **API Call** that requests a conversation token from your backend.
+For the current library implementation, you do **not** need to create a separate FlutterFlow API Call or manually map a token response into the initialize action.
 
-### Example low-code flow
+Instead:
 
-- **Method:** `POST`
-- **URL:** `FFAppState().elevenLabsConversationTokenEndpoint`
-- **Body:** send the `agentId`
+- store your backend URL in `FFAppState().elevenLabsConversationTokenEndpoint`
+- store your agent ID in `FFAppState().elevenLabsAgentId`
+- let `initializeConversationService` call the backend for you
 
-### Recommended request body
+### What the library sends to your backend
+
+The initialize flow makes a `POST` request to your configured endpoint with this JSON body:
 
 ```json
 {
@@ -173,17 +198,11 @@ In FlutterFlow, create an **API Call** that requests a conversation token from y
 }
 ```
 
-### Expected response
+### What your backend should return
 
-Your backend should return a field containing the token, for example:
+Return one of the supported payloads shown above, including a `token` field.
 
-```json
-{
-  "conversationToken": "your-temporary-token"
-}
-```
-
-In FlutterFlow, create a response mapping so you can read that token in your action flow.
+If you want to test your backend manually in FlutterFlow or Postman, use the same request body and confirm the response includes `token`.
 
 ---
 
@@ -222,25 +241,27 @@ On the page where the conversation should start, configure your action flow in F
 
 ### Recommended order
 
-1. **Request microphone permission**
-2. **Call your token API**
-3. **Read the returned `conversationToken`**
-4. **Run the custom action to initialize the conversation**
+1. **Populate App State** with your `elevenLabsAgentId` and `elevenLabsConversationTokenEndpoint`
+2. **Request microphone permission** (recommended for clearer UX)
+3. **Run the custom action to initialize the conversation**
+4. **If initialization fails, surface the returned error string in the UI**
 
 ### Conceptual flow inside FlutterFlow
 
-- Action 1: Request microphone permission
-- Action 2: Execute your token API call
-- Action 3: If token exists, run `initializeConversationService`
+- Action 1: Ensure App State contains `elevenLabsAgentId` and `elevenLabsConversationTokenEndpoint`
+- Action 2: Request microphone permission
+- Action 3: Run `initializeConversationService`
 - Action 4: If initialization fails, show an error message or snackbar
 
 ### Inputs you will use
 
 The initialize action should receive:
 
-- `conversationToken`
+- current page `context`
 - your `agentId`
-- current page context as required by FlutterFlow
+- your backend `endpoint`
+
+The library will fetch the token internally.
 
 ---
 
@@ -348,7 +369,7 @@ As a FlutterFlow user, you do **not** need to manually manage those package-leve
 
 | Problem | What to check in FlutterFlow |
 |---|---|
-| Conversation does not start | Confirm your token API call returns a valid `conversationToken` |
+| Conversation does not start | Confirm your backend endpoint returns a valid `token` and that `elevenLabsConversationTokenEndpoint` points to the correct URL |
 | Permission error | Confirm microphone permissions are enabled in project settings and granted on device |
 | No transcript on iPhone simulator | Test on a physical device |
 | Agent does not respond | Confirm `elevenLabsAgentId` is correct |
@@ -374,8 +395,7 @@ Before you test, confirm all of the following:
 - backend token endpoint deployed
 - `elevenLabsAgentId` added to App State
 - `elevenLabsConversationTokenEndpoint` added to App State
-- token API Call created in FlutterFlow
-- page action flow wired for permission → token → initialize
+- page action flow wired for App State → permission → initialize
 - recording widget added to the page
 - `stopConversationService` added on exit/dispose
 - tested on a real mobile device

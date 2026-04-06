@@ -43,10 +43,11 @@ class ElevenLabsSdkService {
 
 ## Initialization Flow
 
-1. **Call backend** → Get conversation token (not API key)
-2. **Initialize service** → `ElevenLabsSdkService.initialize()`
-3. **Start WebRTC** → SDK handles connection
-4. **Update state** → `FFAppState` reflects connection status
+1. **Pass agent ID + backend endpoint** into `initializeConversationService`
+2. **Library calls backend** → Gets conversation token (not API key)
+3. **Initialize service** → `ElevenLabsSdkService.initialize()`
+4. **Start WebRTC** → SDK handles connection
+5. **Update state** → `FFAppState` reflects connection status
 
 ## Required App State Variables
 
@@ -82,7 +83,7 @@ await stopConversationService();
 ## Security
 
 - **Token-based auth**: Never expose API key; use secure backend endpoint
-- Cloud function generates temporary `conversationToken`
+- Cloud function generates a temporary token response (current code reads `token`, and may also receive `signedUrl`)
 - Client only handles token, not API key
 
 ## Widget Integration
