@@ -3,7 +3,7 @@ description: >
   A FlutterFlow library that gives your profject seamless access to the 
   state-of-the-art ElevenLabs Conversational AI v2 API using the official 
   'elevenlabs_agents' Flutter SDK. This library unlocks real-time 
-  speech-to-speech (conversational ) interactions via WebRTC and Elevenlabs 
+  speech-to-speech (conversational) interactions via WebRTC and Elevenlabs 
   Agents. It includes access to advanced turn-taking models, and 
   enterprise-grade features.
 
@@ -41,10 +41,7 @@ dependencies:
   csv: 6.0.0
   device_info_plus: ^12.4.0
   device_info_plus_platform_interface: ^7.0.3
-  elevenlabs_agents:
-    git:
-      url: https://github.com/sgardoll/elevenlabs-flutter.git
-      ref: flutterflow-compat
+  elevenlabs_agents: 0.4.0
   equatable: 2.0.7
   flutter_animate: 4.5.0
   flutter_cache_manager: 3.4.1
