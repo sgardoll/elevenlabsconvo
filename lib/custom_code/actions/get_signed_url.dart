@@ -15,7 +15,7 @@ import 'index.dart'; // Imports other custom actions
 /// - { "token": "..." } for the official ElevenLabs SDK
 /// - { "signedUrl": "..." } for legacy WebSocket connections (fallback)
 
-// You can clone the BuildShip template to use from: https://app.buildship.com/remix/2be7bf63-d0ec-4a47-941e-06ce2f24d42a?via=lb
+// You can clone the BuildShip template to use from: https://app.buildship.com/remix/dfb510c9-5e03-4284-beba-8471b2340595?via=lb
 
 Future<String?> getSignedUrl(
   String agentId,
