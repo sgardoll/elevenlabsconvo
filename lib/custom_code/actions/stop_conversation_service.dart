@@ -3,11 +3,10 @@ import '/backend/schema/structs/index.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import 'index.dart'; // Imports other custom actions
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 // Begin custom action code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
-
-import 'index.dart'; // Imports other custom actions
 
 import '/custom_code/elevenlabs_sdk_service.dart';
 
@@ -25,9 +24,13 @@ Future stopConversationService() async {
       FFAppState().conversationMessages = [];
     });
 
-    debugPrint('Conversation service stopped and disposed successfully');
+    if (kDebugMode) {
+      debugPrint('Conversation service stopped and disposed successfully');
+    }
   } catch (e) {
-    debugPrint('Error stopping conversation service: $e');
+    if (kDebugMode) {
+      debugPrint('Error stopping conversation service: $e');
+    }
 
     // Still update state even if there was an error
     FFAppState().update(() {

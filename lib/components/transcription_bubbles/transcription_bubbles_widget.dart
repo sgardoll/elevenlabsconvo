@@ -2,7 +2,6 @@ import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/backend/schema/structs/index.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'transcription_bubbles_model.dart';
 export 'transcription_bubbles_model.dart';
@@ -13,7 +12,7 @@ class TranscriptionBubblesWidget extends StatefulWidget {
   const TranscriptionBubblesWidget({
     super.key,
     required this.jsonResponse,
-    required this.onInitCallback,
+    this.onInitCallback,
     String? agentName,
     this.agentImage,
   }) : this.agentName = agentName ?? 'Elevenlabs Agent';
@@ -42,11 +41,6 @@ class _TranscriptionBubblesWidgetState
   void initState() {
     super.initState();
     _model = createModel(context, () => TranscriptionBubblesModel());
-
-    // On component load action.
-    SchedulerBinding.instance.addPostFrameCallback((_) async {
-      await widget.onInitCallback?.call();
-    });
   }
 
   @override
@@ -58,6 +52,10 @@ class _TranscriptionBubblesWidgetState
 
   @override
   Widget build(BuildContext context) {
+    final response = ElevenResponseStruct.maybeFromMap(widget.jsonResponse);
+    final responseType = response?.type ?? '';
+    final responseContent = response?.content ?? '';
+
     return Container(
       decoration: BoxDecoration(
         color: Colors.transparent,
@@ -67,11 +65,7 @@ class _TranscriptionBubblesWidgetState
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (valueOrDefault<bool>(
-              ElevenResponseStruct.maybeFromMap(widget.jsonResponse)?.type ==
-                  'agent',
-              false,
-            ))
+            if (responseType == 'agent')
               Row(
                 mainAxisSize: MainAxisSize.max,
                 mainAxisAlignment: MainAxisAlignment.start,
@@ -153,10 +147,7 @@ class _TranscriptionBubblesWidgetState
                             ].divide(SizedBox(width: 8.0)),
                           ),
                           Text(
-                            getJsonField(
-                              widget.jsonResponse,
-                              r'''$.content''',
-                            ).toString(),
+                            responseContent,
                             style: FlutterFlowTheme.of(context)
                                 .bodyMedium
                                 .override(
@@ -183,11 +174,7 @@ class _TranscriptionBubblesWidgetState
                   ),
                 ],
               ),
-            if (valueOrDefault<bool>(
-              ElevenResponseStruct.maybeFromMap(widget.jsonResponse)?.type ==
-                  'user',
-              false,
-            ))
+            if (responseType == 'user')
               Row(
                 mainAxisSize: MainAxisSize.max,
                 mainAxisAlignment: MainAxisAlignment.end,
@@ -246,10 +233,7 @@ class _TranscriptionBubblesWidgetState
                                 ),
                           ),
                           Text(
-                            getJsonField(
-                              widget.jsonResponse,
-                              r'''$.content''',
-                            ).toString(),
+                            responseContent,
                             textAlign: TextAlign.end,
                             style: FlutterFlowTheme.of(context)
                                 .bodyMedium

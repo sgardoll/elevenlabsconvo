@@ -43,8 +43,6 @@
     <string>This app requires access to Bluetooth in order to communicate with AI Agents</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>This app requires access to Microphone in order to communicate with AI Agents</string>
-    <key>NSCameraUsageDescription</key>
-    <string>This app requires access to Camera in order to communicate with AI Agents</string>
     <!-- Start of NSLocalNetworkUsageDescription -->
     <key>NSLocalNetworkUsageDescription</key>
     <string>Needed to access AI services on your local network.</string>
@@ -147,8 +145,6 @@
 	<true/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>This app requires access to Bluetooth in order to communicate with AI Agents</string>
-	<key>NSCameraUsageDescription</key>
-	<string>This app requires access to Camera in order to communicate with AI Agents</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Needed to access AI services on your local network.</string>
 	<key>NSMicrophoneUsageDescription</key>
