@@ -25,6 +25,7 @@ class _ConversationalDemoWidgetState extends State<ConversationalDemoWidget> {
   late ConversationalDemoModel _model;
 
   final scaffoldKey = GlobalKey<ScaffoldState>();
+  int _lastMessageCount = 0;
 
   @override
   void initState() {
@@ -81,11 +82,25 @@ class _ConversationalDemoWidgetState extends State<ConversationalDemoWidget> {
                   child: Builder(
                     builder: (context) {
                       final conversationMessages =
-                          FFAppState().conversationMessages.toList();
+                          FFAppState().conversationMessages;
+
+                      if (conversationMessages.length != _lastMessageCount) {
+                        _lastMessageCount = conversationMessages.length;
+                        SchedulerBinding.instance.addPostFrameCallback((_) {
+                          if (!mounted ||
+                              !_model.listViewController!.hasClients) {
+                            return;
+                          }
+                          _model.listViewController!.animateTo(
+                            _model.listViewController!.position.maxScrollExtent,
+                            duration: Duration(milliseconds: 100),
+                            curve: Curves.ease,
+                          );
+                        });
+                      }
 
                       return ListView.builder(
                         padding: EdgeInsets.zero,
-                        shrinkWrap: true,
                         scrollDirection: Axis.vertical,
                         itemCount: conversationMessages.length,
                         itemBuilder: (context, conversationMessagesIndex) {
@@ -104,14 +119,6 @@ class _ConversationalDemoWidgetState extends State<ConversationalDemoWidget> {
                               ),
                               jsonResponse: conversationMessagesItem,
                               agentName: 'ElevenLabs Agent',
-                              onInitCallback: () async {
-                                await _model.listViewController?.animateTo(
-                                  _model.listViewController!.position
-                                      .maxScrollExtent,
-                                  duration: Duration(milliseconds: 100),
-                                  curve: Curves.ease,
-                                );
-                              },
                             ),
                           );
                         },

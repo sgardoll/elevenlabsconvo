@@ -20,28 +20,22 @@ class FFAppState extends ChangeNotifier {
   Future initializePersistedState() async {
     secureStorage = FlutterSecureStorage();
     await _safeInitAsync(() async {
-      _endpoint = await secureStorage.getString('ff_endpoint') ?? _endpoint;
-    });
-    await _safeInitAsync(() async {
-      _isSignedUrlExpired =
-          await secureStorage.getBool('ff_isSignedUrlExpired') ??
-              _isSignedUrlExpired;
-    });
-    await _safeInitAsync(() async {
-      _cachedSignedUrl = await secureStorage.getString('ff_cachedSignedUrl') ??
-          _cachedSignedUrl;
-    });
-    await _safeInitAsync(() async {
-      _signedUrlExpirationTime =
-          await secureStorage.read(key: 'ff_signedUrlExpirationTime') != null
-              ? DateTime.fromMillisecondsSinceEpoch(
-                  (await secureStorage.getInt('ff_signedUrlExpirationTime'))!)
-              : _signedUrlExpirationTime;
-    });
-    await _safeInitAsync(() async {
-      _elevenLabsAgentId =
-          await secureStorage.getString('ff_elevenLabsAgentId') ??
-              _elevenLabsAgentId;
+      final persistedValues = await Future.wait<dynamic>([
+        secureStorage.getString('ff_endpoint'),
+        secureStorage.getBool('ff_isSignedUrlExpired'),
+        secureStorage.getString('ff_cachedSignedUrl'),
+        secureStorage.getInt('ff_signedUrlExpirationTime'),
+        secureStorage.getString('ff_elevenLabsAgentId'),
+      ]);
+
+      _endpoint = persistedValues[0] as String? ?? _endpoint;
+      _isSignedUrlExpired = persistedValues[1] as bool? ?? _isSignedUrlExpired;
+      _cachedSignedUrl = persistedValues[2] as String? ?? _cachedSignedUrl;
+      final expirationTime = persistedValues[3] as int?;
+      _signedUrlExpirationTime = expirationTime != null
+          ? DateTime.fromMillisecondsSinceEpoch(expirationTime)
+          : _signedUrlExpirationTime;
+      _elevenLabsAgentId = persistedValues[4] as String? ?? _elevenLabsAgentId;
     });
   }
 
@@ -192,12 +186,6 @@ class FFAppState extends ChangeNotifier {
   void deleteElevenLabsAgentId() {
     secureStorage.delete(key: 'ff_elevenLabsAgentId');
   }
-}
-
-void _safeInit(Function() initializeField) {
-  try {
-    initializeField();
-  } catch (_) {}
 }
 
 Future _safeInitAsync(Function() initializeField) async {

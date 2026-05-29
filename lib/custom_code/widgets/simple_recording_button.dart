@@ -4,11 +4,10 @@ import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import 'index.dart'; // Imports other custom widgets
 import '/custom_code/actions/index.dart'; // Imports custom actions
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 // Begin custom widget code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
-
-import 'index.dart'; // Imports other custom widgets
 
 import '/custom_code/elevenlabs_sdk_service.dart';
 import 'dart:async';
@@ -128,7 +127,9 @@ class _SimpleRecordingButtonState extends State<SimpleRecordingButton>
 
     // Allow interruption if agent is speaking - tap to end conversation
     if (_currentState == ConversationState.playing) {
-      debugPrint('🔊 User tapped to end conversation while agent speaking');
+      if (kDebugMode) {
+        debugPrint('User tapped to end conversation while agent speaking');
+      }
       await _service.triggerInterruption();
       _showSnackBar('Conversation ended');
       return;

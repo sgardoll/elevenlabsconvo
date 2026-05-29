@@ -135,11 +135,7 @@ class ApiCallOptions extends Equatable {
       ];
 
   static Map<String, dynamic> _cloneMap(Map<String, dynamic> map) {
-    try {
-      return json.decode(json.encode(map)) as Map<String, dynamic>;
-    } catch (_) {
-      return Map.from(map);
-    }
+    return Map<String, dynamic>.from(map);
   }
 }
 
@@ -263,9 +259,8 @@ class ApiManager {
   // You may want to call this if, for example, you make a change to the
   // database and no longer want the cached result of a call that may
   // have changed.
-  static void clearCache(String callName) => _apiCache.keys
-      .toSet()
-      .forEach((k) => k.callName == callName ? _apiCache.remove(k) : null);
+  static void clearCache(String callName) =>
+      _apiCache.removeWhere((k, _) => k.callName == callName);
 
   static Map<String, String> toStringMap(Map map) =>
       map.map((key, value) => MapEntry(key.toString(), value.toString()));
@@ -292,10 +287,10 @@ class ApiManager {
     }
     if (isStreamingApi) {
       client ??= http.Client();
-      final request =
-          http.Request(callType.toString().split('.').last, Uri.parse(apiUrl))
-            ..headers.addAll(toStringMap(headers));
-      final streamedResponse = await getStreamedResponse(request);
+      final request = http.Request(callType.name, Uri.parse(apiUrl))
+        ..headers.addAll(toStringMap(headers));
+      final streamedResponse =
+          await getStreamedResponse(request, client: client);
       return ApiCallResponse(
         null,
         streamedResponse.headers,
@@ -335,11 +330,11 @@ class ApiManager {
         createBody(headers, params, body, bodyType, encodeBodyUtf8);
     if (isStreamingApi) {
       client ??= http.Client();
-      final request =
-          http.Request(type.toString().split('.').last, Uri.parse(apiUrl))
-            ..headers.addAll(toStringMap(headers));
+      final request = http.Request(type.name, Uri.parse(apiUrl))
+        ..headers.addAll(toStringMap(headers));
       request.body = postBody;
-      final streamedResponse = await getStreamedResponse(request);
+      final streamedResponse =
+          await getStreamedResponse(request, client: client);
       return ApiCallResponse(
         null,
         streamedResponse.headers,
@@ -406,8 +401,7 @@ class ApiManager {
       }
     });
 
-    final request = http.MultipartRequest(
-        type.toString().split('.').last, Uri.parse(apiUrl))
+    final request = http.MultipartRequest(type!.name, Uri.parse(apiUrl))
       ..headers.addAll(toStringMap(headers))
       ..files.addAll(files);
     nonFileParams.forEach((key, value) => request.fields[key] = value);
