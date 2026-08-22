@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:eleven_labs_conversational_a_i_library/convai/convai_config.dart';
 import 'package:eleven_labs_conversational_a_i_library/convai/convai_websocket_client.dart';
+import 'package:eleven_labs_conversational_a_i_library/convai/session_store.dart';
 
 /// Minimal ConvAI protocol server over a real loopback WebSocket, so client
 /// lifecycle behavior (handshake, reconnect, drops) is exercised end-to-end.
@@ -72,6 +73,30 @@ class _TestConvAiServer {
   }
 }
 
+/// In-memory [ConvAiSessionStore] so budget persistence can be observed
+/// across client instances without platform channels.
+class _InMemorySessionStore implements ConvAiSessionStore {
+  final Map<String, int> turnCounts = <String, int>{};
+  String? sessionId;
+
+  @override
+  Future<String?> loadSessionId() async => sessionId;
+
+  @override
+  Future<void> saveSessionId(String sessionId) async => this.sessionId = sessionId;
+
+  @override
+  Future<void> clearSessionId() async => sessionId = null;
+
+  @override
+  Future<int> loadTurnCount(String conversationId) async =>
+      turnCounts[conversationId] ?? 0;
+
+  @override
+  Future<void> saveTurnCount(String conversationId, int count) async =>
+      turnCounts[conversationId] = count;
+}
+
 ConvAiWebSocketClient _clientFor(
   Uri endpoint, {
   String token = '',
@@ -81,6 +106,8 @@ ConvAiWebSocketClient _clientFor(
   Duration initialBackoff = const Duration(milliseconds: 10),
   Duration maxBackoff = const Duration(milliseconds: 40),
   int maxReconnectAttempts = 3,
+  int? maxSessionTurns,
+  ConvAiSessionStore? sessionStore,
 }) {
   // Direct (xi-api-key) mode exists only through the test-only factory;
   // token mode uses the production constructor.
@@ -97,6 +124,7 @@ ConvAiWebSocketClient _clientFor(
           initialBackoff: initialBackoff,
           maxBackoff: maxBackoff,
           maxReconnectAttempts: maxReconnectAttempts,
+          maxSessionTurns: maxSessionTurns ?? 50,
         )
       : ConvAiConfig(
           token: token,
@@ -109,8 +137,9 @@ ConvAiWebSocketClient _clientFor(
           initialBackoff: initialBackoff,
           maxBackoff: maxBackoff,
           maxReconnectAttempts: maxReconnectAttempts,
+          maxSessionTurns: maxSessionTurns ?? 50,
         );
-  return ConvAiWebSocketClient(config: config);
+  return ConvAiWebSocketClient(config: config, sessionStore: sessionStore);
 }
 
 Future<T> _waitFor<T>(
@@ -237,6 +266,170 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 200));
       expect(client.state, ConvAiConnectionState.disconnected);
       expect(server.connections, 1 + maxReconnects);
+    });
+
+    test('a duplicate agent_response completes the turn once and never '
+        'breaks the listener', () async {
+      final endpoint = Uri.parse(await server.start());
+      server.onConnection = (socket, index) {
+        _TestConvAiServer._completeHandshake(socket, 'conv_$index');
+      };
+      server.onMessage = (socket, data) {
+        final frame = jsonDecode(data as String) as Map<String, dynamic>;
+        if (frame['type'] != 'user_message') return;
+        // Two agent_response frames for one send: only the first may
+        // complete the wait; the second must be ignored, not thrown on.
+        socket.add(jsonEncode(<String, dynamic>{
+          'type': 'agent_response',
+          'agent_response_event': {'agent_response': 'first!', 'event_id': 2},
+        }));
+        socket.add(jsonEncode(<String, dynamic>{
+          'type': 'agent_response',
+          'agent_response_event': {'agent_response': 'second!', 'event_id': 3},
+        }));
+      };
+
+      final client = _clientFor(endpoint);
+      addTearDown(client.dispose);
+
+      await client.connect();
+      expect(await client.sendMessage('hello'), 'first!');
+
+      // The socket listener survived the duplicate frame.
+      expect(await client.sendMessage('again'), 'first!');
+    });
+
+    test('an unsolicited agent_response while idle never satisfies a later '
+        'send', () async {
+      final endpoint = Uri.parse(await server.start());
+      server.onConnection = (socket, index) {
+        _TestConvAiServer._completeHandshake(socket, 'conv_$index');
+        // Stray reply pushed before any user message exists.
+        socket.add(jsonEncode(<String, dynamic>{
+          'type': 'agent_response',
+          'agent_response_event': {'agent_response': 'STRAY', 'event_id': 1},
+        }));
+      };
+      server.onMessage = (socket, data) {
+        final frame = jsonDecode(data as String) as Map<String, dynamic>;
+        if (frame['type'] == 'user_message') {
+          socket.add(jsonEncode(<String, dynamic>{
+            'type': 'agent_response',
+            'agent_response_event': {
+              'agent_response': 'echo: ${frame['text']}',
+              'event_id': 2,
+            },
+          }));
+        }
+      };
+
+      final client = _clientFor(endpoint);
+      addTearDown(client.dispose);
+
+      await client.connect();
+      // Let the stray frame land while no turn is pending.
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      expect(await client.sendMessage('hello'), 'echo: hello');
+    });
+
+    test('exhausted response retries surface the detailed TimeoutException',
+        () async {
+      final endpoint = Uri.parse(await server.start());
+      // Handshake completes, but the server never answers user messages.
+      server.onConnection = (socket, index) {
+        _TestConvAiServer._completeHandshake(socket, 'conv_$index');
+      };
+
+      final client = _clientFor(
+        endpoint,
+        responseTimeout: const Duration(milliseconds: 80),
+      );
+      addTearDown(client.dispose);
+
+      await client.connect();
+      await expectLater(
+        client.sendMessage('hello'),
+        throwsA(
+          isA<TimeoutException>().having(
+            (error) => error.message,
+            'message',
+            contains('2 attempts'),
+          ),
+        ),
+      );
+      // The detailed exception is also what the client records.
+      expect(
+        client.lastError,
+        isA<TimeoutException>()
+            .having((error) => error.message, 'message', contains('2 attempts')),
+      );
+    });
+
+    test('turn budget persists per conversation and resets for new ones',
+        () async {
+      final endpoint = Uri.parse(await server.start());
+      const cap = 3;
+      // Connections 1-2 resume the same conversation; connection 3 is new.
+      server.onConnection = (socket, index) {
+        _TestConvAiServer._completeHandshake(
+          socket,
+          index <= 2 ? 'conv_budget' : 'conv_fresh',
+        );
+      };
+      server.onMessage = (socket, data) {
+        final frame = jsonDecode(data as String) as Map<String, dynamic>;
+        if (frame['type'] == 'user_message') {
+          socket.add(jsonEncode(<String, dynamic>{
+            'type': 'agent_response',
+            'agent_response_event': {
+              'agent_response': 'echo: ${frame['text']}',
+              'event_id': 2,
+            },
+          }));
+        }
+      };
+
+      final store = _InMemorySessionStore();
+
+      // Session A burns two of three turns in conv_budget.
+      final first = _clientFor(
+        endpoint,
+        maxSessionTurns: cap,
+        sessionStore: store,
+      );
+      addTearDown(first.dispose);
+      await first.connect();
+      expect(first.conversationId, 'conv_budget');
+      await first.sendMessage('one');
+      await first.sendMessage('two');
+      expect(first.remainingTurns, cap - 2);
+      await first.disconnect();
+
+      // App-restart simulation: a new client resuming conv_budget keeps its
+      // spent budget.
+      final resumed = _clientFor(
+        endpoint,
+        maxSessionTurns: cap,
+        sessionStore: store,
+      );
+      addTearDown(resumed.dispose);
+      await resumed.connect();
+      expect(resumed.conversationId, 'conv_budget');
+      expect(resumed.remainingTurns, cap - 2);
+      await resumed.disconnect();
+
+      // A NEW conversation must start with a full budget, not inherit
+      // conv_budget's spent turns.
+      final fresh = _clientFor(
+        endpoint,
+        maxSessionTurns: cap,
+        sessionStore: store,
+      );
+      addTearDown(fresh.dispose);
+      await fresh.connect();
+      expect(fresh.conversationId, 'conv_fresh');
+      expect(fresh.remainingTurns, cap);
     });
   });
 }

@@ -198,9 +198,15 @@ class ConvAiConversation {
         'got ${rawMessages.runtimeType}.',
       );
     }
-    final messages = rawMessages
-        .map((raw) => ConvAiMessage.fromJson(Map<String, dynamic>.from(raw as Map)))
-        .toList();
+    final messages = rawMessages.map((raw) {
+      if (raw is! Map) {
+        throw ConvAiHistoryException(
+          'Conversation "$id" message must be an object, '
+          'got ${raw.runtimeType}.',
+        );
+      }
+      return ConvAiMessage.fromJson(Map<String, dynamic>.from(raw));
+    }).toList();
     return ConvAiConversation(
       id: id,
       sessionId: sessionId,
@@ -356,6 +362,11 @@ class SharedPreferencesConvAiConversationHistoryStore
     } on ConvAiHistoryException {
       return null;
     } on FormatException {
+      return null;
+    } on TypeError {
+      // A shape the parsers could not even cast (e.g. a nested value of an
+      // unexpected runtime type) is corruption like any other: skip it so
+      // bulk reads survive.
       return null;
     }
   }

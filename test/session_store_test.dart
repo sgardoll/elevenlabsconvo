@@ -52,26 +52,36 @@ void main() {
     test('defaults to zero turns when nothing was persisted', () async {
       final store = const SharedPreferencesConvAiSessionStore();
 
-      expect(await store.loadTurnCount(), 0);
+      expect(await store.loadTurnCount('conv_1'), 0);
     });
 
-    test('persists and reloads the turn count', () async {
+    test('persists and reloads the turn count per conversation', () async {
       final store = const SharedPreferencesConvAiSessionStore();
 
-      await store.saveTurnCount(37);
+      await store.saveTurnCount('conv_1', 37);
+      await store.saveTurnCount('conv_2', 3);
 
-      expect(await store.loadTurnCount(), 37);
+      expect(await store.loadTurnCount('conv_1'), 37);
+      expect(await store.loadTurnCount('conv_2'), 3);
     });
 
-    test('clearing the session resets the turn budget too', () async {
+    test('one conversation count never leaks into another', () async {
+      final store = const SharedPreferencesConvAiSessionStore();
+      await store.saveTurnCount('conv_1', 50);
+
+      expect(await store.loadTurnCount('conv_other'), 0);
+    });
+
+    test('clearing the session id leaves conversation budgets intact',
+        () async {
       final store = const SharedPreferencesConvAiSessionStore();
       await store.saveSessionId('session-abc-123');
-      await store.saveTurnCount(50);
+      await store.saveTurnCount('conv_1', 50);
 
       await store.clearSessionId();
 
       expect(await store.loadSessionId(), isNull);
-      expect(await store.loadTurnCount(), 0);
+      expect(await store.loadTurnCount('conv_1'), 50);
     });
   });
 }

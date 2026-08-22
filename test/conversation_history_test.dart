@@ -159,6 +159,22 @@ void main() {
         throwsA(isA<ConvAiHistoryException>()),
       );
     });
+
+    test('fromJson fails fast with a typed error on a non-object message',
+        () {
+      expect(
+        () => ConvAiConversation.fromJson(<String, dynamic>{
+          'id': 'conv_1',
+          'session_id': 's',
+          'started_at': 1,
+          'updated_at': 1,
+          // A nested element that is not an object must surface as
+          // ConvAiHistoryException, never as a raw TypeError.
+          'messages': <Object>['not-an-object'],
+        }),
+        throwsA(isA<ConvAiHistoryException>()),
+      );
+    });
   });
 
   group('SharedPreferencesConvAiConversationHistoryStore', () {
@@ -277,6 +293,48 @@ void main() {
       final conversations = await store.loadAll();
 
       expect(conversations.map((c) => c.id).toList(), <String>['good']);
+    });
+
+    test('entries with non-object message elements are skipped by loadAll',
+        () async {
+      final store = const SharedPreferencesConvAiConversationHistoryStore();
+      await store.save(_conversation(id: 'good').withMessage(
+          _message(ConvAiMessageRole.user, 'hello')));
+      final preferences = await SharedPreferences.getInstance();
+      // Nested corruption: "messages" contains a bare string, which used to
+      // escape the read guard as a raw TypeError before this fix.
+      await preferences.setString(
+        'convai_conversation_nested_bad',
+        jsonEncode(<String, dynamic>{
+          'id': 'nested_bad',
+          'session_id': 's',
+          'started_at': 1,
+          'updated_at': 1,
+          'messages': <Object>['not-an-object'],
+        }),
+      );
+
+      final conversations = await store.loadAll();
+
+      expect(conversations.map((c) => c.id).toList(), <String>['good']);
+    });
+
+    test('load returns null (not a throw) for an entry with corrupt messages',
+        () async {
+      final store = const SharedPreferencesConvAiConversationHistoryStore();
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setString(
+        'convai_conversation_broken',
+        jsonEncode(<String, dynamic>{
+          'id': 'broken',
+          'session_id': 's',
+          'started_at': 1,
+          'updated_at': 1,
+          'messages': <Object>[42],
+        }),
+      );
+
+      expect(await store.load('broken'), isNull);
     });
 
     test('clear removes every conversation and the index', () async {
