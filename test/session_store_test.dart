@@ -43,4 +43,35 @@ void main() {
       expect(await store.loadSessionId(), isNull);
     });
   });
+
+  group('SharedPreferencesConvAiSessionStore turn count', () {
+    setUp(() {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+    });
+
+    test('defaults to zero turns when nothing was persisted', () async {
+      final store = const SharedPreferencesConvAiSessionStore();
+
+      expect(await store.loadTurnCount(), 0);
+    });
+
+    test('persists and reloads the turn count', () async {
+      final store = const SharedPreferencesConvAiSessionStore();
+
+      await store.saveTurnCount(37);
+
+      expect(await store.loadTurnCount(), 37);
+    });
+
+    test('clearing the session resets the turn budget too', () async {
+      final store = const SharedPreferencesConvAiSessionStore();
+      await store.saveSessionId('session-abc-123');
+      await store.saveTurnCount(50);
+
+      await store.clearSessionId();
+
+      expect(await store.loadSessionId(), isNull);
+      expect(await store.loadTurnCount(), 0);
+    });
+  });
 }

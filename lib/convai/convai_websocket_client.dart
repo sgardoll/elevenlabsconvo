@@ -7,9 +7,13 @@
 /// - Perform the initiation handshake and capture the server `conversation_id`.
 /// - Maintain a persisted local session UUID per conversation.
 /// - Encode user text messages and complete round-trips when the matching
-///   `agent_response` arrives.
+///   `agent_response` arrives, retrying an unanswered send exactly
+///   [ConvAiConfig.maxResponseRetries] times before failing the turn.
 /// - Auto-reconnect an established session with exponential backoff + jitter,
 /// - Enforce connect / handshake / response timeouts.
+/// - Enforce the per-session turn budget ([ConvAiConfig.maxSessionTurns]),
+///   persisting spent turns with the session id so the cap holds across app
+///   restarts.
 /// - Answer server pings automatically to keep the socket open across long
 ///   exchanges.
 ///
@@ -31,6 +35,7 @@ import 'convai_config.dart';
 import 'convai_events.dart';
 import 'session_store.dart';
 import 'socket_channel_factory.dart';
+import 'turn_rate_limiter.dart';
 
 /// Connection lifecycle states surfaced on [ConvAiWebSocketClient.stateStream].
 enum ConvAiConnectionState {
@@ -63,12 +68,14 @@ class ConvAiWebSocketClient {
     required ConvAiConfig config,
     ConvAiSessionStore? sessionStore,
   })  : _config = config,
-        _sessionStore = sessionStore;
+        _sessionStore = sessionStore,
+        _turnLimiter = ConvAiTurnRateLimiter(maxTurns: config.maxSessionTurns);
 
   final ConvAiConfig _config;
   final ConvAiSessionStore? _sessionStore;
   final Uuid _uuid = const Uuid();
   final Random _random = Random();
+  ConvAiTurnRateLimiter _turnLimiter;
 
   final StreamController<ConvAiConnectionState> _stateController =
       StreamController<ConvAiConnectionState>.broadcast();
@@ -114,6 +121,12 @@ class ConvAiWebSocketClient {
   /// Last error observed by this client, if any.
   Object? get lastError => _lastError;
 
+  /// Turns still available in this session's budget.
+  int get remainingTurns => _turnLimiter.remainingTurns;
+
+  /// Configured per-session turn cap.
+  int get maxSessionTurns => _config.maxSessionTurns;
+
   /// Opens a session: connects, authenticates, completes the handshake, and
   /// returns the server metadata.
   ///
@@ -130,6 +143,7 @@ class ConvAiWebSocketClient {
 
     _shouldStayConnected = true;
     await _ensureLocalSessionId();
+    await _restoreTurnBudget();
     return _openSession(isReconnectAttempt: false);
   }
 
@@ -137,9 +151,11 @@ class ConvAiWebSocketClient {
   /// the matching `agent_response` event arrives.
   ///
   /// Concurrent calls are serialized; each resolves against its own turn.
-  /// Throws [TimeoutException] when no response arrives within
-  /// [ConvAiConfig.responseTimeout], and [StateError] when the connection
-  /// drops before the exchange completes.
+  /// An unanswered send is retried automatically up to
+  /// [ConvAiConfig.maxResponseRetries] times before the turn fails with
+  /// [TimeoutException]. Throws [ConvAiRateLimitException] once the session's
+  /// turn budget is exhausted, and [StateError] when the connection drops
+  /// before the exchange completes.
   Future<String> sendMessage(String text) {
     if (!_shouldStayConnected) {
       throw StateError('sendMessage called before connect().');
@@ -156,7 +172,7 @@ class ConvAiWebSocketClient {
 
     // Serialize turns so responses never interleave between callers.
     final result = _sendQueue.then(
-      (_) => _roundTrip(trimmed),
+      (_) => _guardedRoundTrip(trimmed),
     );
     // Keep the queue alive even when a turn fails.
     _sendQueue = result.then<void>((_) {}, onError: (_) {});
@@ -175,10 +191,11 @@ class ConvAiWebSocketClient {
     _setState(ConvAiConnectionState.disconnected);
   }
 
-  /// Clears the persisted session UUID so the next [connect] starts a brand
-  /// new logical session.
+  /// Clears the persisted session UUID and its turn count so the next
+  /// [connect] starts a brand new logical session with a fresh budget.
   Future<void> resetSession() async {
     _localSessionId = null;
+    _turnLimiter = ConvAiTurnRateLimiter(maxTurns: _config.maxSessionTurns);
     await _sessionStore?.clearSessionId();
   }
 
@@ -440,22 +457,49 @@ class ConvAiWebSocketClient {
   // Round-trip plumbing
   // ---------------------------------------------------------------------------
 
+  /// Enforces the turn budget, consumes one turn, persists the count, then
+  /// performs the exchange (with timeout retries).
+  Future<String> _guardedRoundTrip(String text) async {
+    _turnLimiter.ensureCanSend();
+    _turnLimiter.recordTurn();
+    await _persistTurnCount();
+    return _roundTrip(text);
+  }
+
+  Future<void> _persistTurnCount() async {
+    final store = _sessionStore;
+    if (store == null) return;
+    await store.saveTurnCount(_turnLimiter.turnsUsed);
+  }
+
   Future<String> _roundTrip(String text) async {
-    final completer = Completer<AgentResponse>();
-    _responseCompleter = completer;
-    try {
-      _sendOrDrop(ConvAiEventCodec.encodeUserMessage(text));
-      final response = await completer.future.timeout(_config.responseTimeout);
-      return response.text;
-    } on TimeoutException {
-      _lastError = TimeoutException(
-        'No agent_response within ${_config.responseTimeout.inSeconds}s.',
-        _config.responseTimeout,
-      );
-      rethrow;
-    } finally {
-      if (identical(_responseCompleter, completer)) {
-        _responseCompleter = null;
+    var attempt = 0;
+    while (true) {
+      final completer = Completer<AgentResponse>();
+      _responseCompleter = completer;
+      try {
+        _sendOrDrop(ConvAiEventCodec.encodeUserMessage(text));
+        final response =
+            await completer.future.timeout(_config.responseTimeout);
+        return response.text;
+      } on TimeoutException {
+        attempt += 1;
+        if (attempt > _config.maxResponseRetries) {
+          final attempts = attempt;
+          _lastError = TimeoutException(
+            'No agent_response within '
+            '${_config.responseTimeout.inSeconds}s '
+            '($attempts ${attempts == 1 ? 'attempt' : 'attempts'}).',
+            _config.responseTimeout,
+          );
+          rethrow;
+        }
+        // One identical resend of the same turn; the budget was already
+        // consumed once and a retry is not a new turn.
+      } finally {
+        if (identical(_responseCompleter, completer)) {
+          _responseCompleter = null;
+        }
       }
     }
   }
@@ -482,6 +526,21 @@ class ConvAiWebSocketClient {
     _localSessionId =
         (persisted == null || persisted.isEmpty) ? _uuid.v4() : persisted;
     await store?.saveSessionId(_localSessionId!);
+  }
+
+  /// Re-seeds the turn budget from persisted storage so the per-session cap
+  /// survives app restarts (a resumed session keeps its spent turns).
+  Future<void> _restoreTurnBudget() async {
+    final store = _sessionStore;
+    if (store == null) return;
+    final persisted = await store.loadTurnCount();
+    if (persisted <= 0) return;
+    // Clamp so a lowered config cap cannot resurrect a negative remaining
+    // count; an already-exhausted budget stays exhausted.
+    _turnLimiter = ConvAiTurnRateLimiter(
+      maxTurns: _config.maxSessionTurns,
+      turnsUsed: min(persisted, _config.maxSessionTurns),
+    );
   }
 
   void _setState(ConvAiConnectionState next) {

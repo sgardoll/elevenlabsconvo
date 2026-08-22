@@ -96,7 +96,19 @@ class ConvAiConfig {
   final Duration initiationTimeout;
 
   /// Max time to await an `agent_response` after sending a text message.
+  ///
+  /// A response slower than this triggers exactly [maxResponseRetries]
+  /// automatic resends of the same user message before the turn fails
+  /// ("response >30s = retry" acceptance criterion).
   final Duration responseTimeout;
+
+  /// Automatic resends of an unanswered user message once [responseTimeout]
+  /// elapses. One retry by default; 0 disables retrying.
+  final int maxResponseRetries;
+
+  /// Hard cap on user turns per logical session (rate limiting). The count
+  /// persists across app restarts with the session id.
+  final int maxSessionTurns;
 
   /// Base delay for the first reconnect attempt; doubles each attempt.
   final Duration initialBackoff;
@@ -118,7 +130,9 @@ class ConvAiConfig {
     this.allowInsecureTransport = false,
     this.connectTimeout = const Duration(seconds: 15),
     this.initiationTimeout = const Duration(seconds: 15),
-    this.responseTimeout = const Duration(seconds: 45),
+    this.responseTimeout = const Duration(seconds: 30),
+    this.maxResponseRetries = 1,
+    this.maxSessionTurns = 50,
     this.initialBackoff = const Duration(seconds: 1),
     this.maxBackoff = const Duration(seconds: 30),
     this.maxReconnectAttempts = 5,
