@@ -51,6 +51,11 @@ class ConvAiService {
   /// Creates a client from explicit values (falling back to dart-defines) and
   /// opens a session.
   ///
+  /// Signed-URL / short-lived-token credentials are preferred. Passing an
+  /// [apiKey] additionally requires [allowInsecureApiKey]: true — a reusable
+  /// key embedded in a distributed build can be extracted and replayed
+  /// outside the app, so that mode is dev-only.
+  ///
   /// Returns `'success'` on connection, or `'error: <reason>'` following the
   /// existing action convention. Missing credentials produce a descriptive
   /// error naming the required dart-defines.
@@ -58,13 +63,17 @@ class ConvAiService {
     required String agentId,
     String apiKey = '',
     String signedUrl = '',
+    String token = '',
+    bool allowInsecureApiKey = false,
   }) async {
     try {
       debugPrint('Initializing ConvAI WebSocket service');
       final config = ConvAiConfig.fromEnvironment(
         apiKey: _blankToNull(apiKey),
         signedUrl: _blankToNull(signedUrl),
+        token: _blankToNull(token),
         agentId: _blankToNull(agentId),
+        allowInsecureApiKey: allowInsecureApiKey,
       );
 
       await _teardownClient();
@@ -107,16 +116,18 @@ class ConvAiService {
 
   /// Sends a text message and completes with the agent's reply text, or
   /// `'error: <reason>'` when the exchange fails.
+  ///
+  /// This path only awaits the turn; it does NOT append chat bubbles. The
+  /// protocol-event handler is the single owner of message appending, so each
+  /// `agent_response` / `user_transcript` event produces exactly one bubble
+  /// instead of duplicating what this completion path used to add again.
   Future<String> sendTextMessage(String text) async {
     final client = _client;
     if (client == null || !client.isConnected) {
       return 'error: Not connected';
     }
     try {
-      final reply = await client.sendMessage(text);
-      _appendMessage(type: 'user', content: text);
-      _appendMessage(type: 'agent', content: reply);
-      return reply;
+      return await client.sendMessage(text);
     } on Object catch (error) {
       debugPrint('Error sending text message: $error');
       return 'error: $error';
@@ -140,6 +151,8 @@ class ConvAiService {
     await _eventController.close();
   }
 
+  /// Single owner of chat-bubble appending: every protocol event appends at
+  /// most one message, and completion paths never do.
   void _onProtocolEvent(ConvAiEvent event) {
     _eventController.add(event);
     switch (event) {

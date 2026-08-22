@@ -7,25 +7,39 @@
 ///
 /// ```sh
 /// flutter run \
-///   --dart-define=ELEVENLABS_API_KEY=sk_... \
+///   --dart-define=ELEVENLABS_TOKEN=<short-lived-token> \
 ///   --dart-define=ELEVENLABS_AGENT_ID=agent_...
 /// ```
 ///
-/// Two authentication modes are supported:
-/// - **Direct API key** (native platforms): the `xi-api-key` header is sent on
-///   the WebSocket upgrade request together with `?agent_id=` in the query.
-/// - **Signed URL** (browser-safe): the host backend provisions a short-lived
-///   `wss://...token=...` URL; the client opens it directly. Browsers cannot
-///   set custom headers on WebSockets, so use this mode on web.
+/// Three authentication modes are supported, in order of preference:
+///
+/// - **Signed URL** (default, production): the host backend provisions a
+///   short-lived `wss://...token=...` URL; the client opens it directly.
+///   Browsers cannot set custom headers on WebSockets, so this mode also
+///   works on web.
+/// - **Token** (production): the backend provisions a short-lived
+///   conversation token (`ELEVENLABS_TOKEN`); the client attaches it to the
+///   endpoint as a `token` query parameter. Short-lived by design, so a
+///   leaked value expires quickly.
+/// - **Direct API key** (dev-only, opt-in): sends the reusable
+///   `ELEVENLABS_API_KEY` in the `xi-api-key` upgrade header. A reusable key
+///   embedded in a distributed build can be extracted and replayed outside
+///   the app, so this mode is refused unless the caller explicitly passes
+///   `allowInsecureApiKey: true`, and it logs a loud security warning when
+///   it activates. Never ship it to production.
 library;
+
+import 'package:flutter/foundation.dart';
 
 const String _envApiKey = String.fromEnvironment('ELEVENLABS_API_KEY');
 const String _envAgentId = String.fromEnvironment('ELEVENLABS_AGENT_ID');
 const String _envWssUrl = String.fromEnvironment('ELEVENLABS_WSS_URL');
+const String _envToken = String.fromEnvironment('ELEVENLABS_TOKEN');
 
 /// Thrown when [ConvAiConfig] cannot be built because required credentials or
-/// identifiers are missing. The message names every missing value and how to
-/// supply it, so setup mistakes are immediately diagnosable.
+/// identifiers are missing — or because insecure API-key mode was requested
+/// without its explicit opt-in flag. The message names every missing value
+/// and how to supply it, so setup mistakes are immediately diagnosable.
 class ConvAiConfigException implements Exception {
   final String message;
 
@@ -46,17 +60,24 @@ class ConvAiConfig {
 
   /// ElevenLabs API key for direct (header-based) authentication.
   ///
-  /// Empty when [signedUrl] mode is used instead. Exactly one of the two modes
-  /// must be active.
+  /// Reusable and extractable from distributed builds: dev-only, and only
+  /// with the explicit `allowInsecureApiKey: true` opt-in. Empty when
+  /// signed-URL or token mode is used instead.
   final String apiKey;
 
   /// Backend-provisioned signed WebSocket URL (`wss://...token=...`).
   ///
-  /// Takes precedence over [apiKey] when non-empty.
+  /// Takes precedence over [token] and [apiKey] when non-empty.
   final String signedUrl;
 
-  /// Target ElevenLabs agent id. Required for direct API-key mode; embedded in
-  /// the signed URL otherwise.
+  /// Backend-provisioned short-lived conversation token.
+  ///
+  /// Attached to [endpoint] as a `token` query parameter. Takes precedence
+  /// over [apiKey]; ignored when [signedUrl] is set.
+  final String token;
+
+  /// Target ElevenLabs agent id. Required for direct API-key mode; embedded
+  /// in the connection query for token mode when present.
   final String agentId;
 
   /// WebSocket endpoint. Ignored in signed-URL mode (the URL carries its own).
@@ -83,6 +104,7 @@ class ConvAiConfig {
   const ConvAiConfig({
     this.apiKey = '',
     this.signedUrl = '',
+    this.token = '',
     this.agentId = '',
     this.endpoint = defaultEndpoint,
     this.connectTimeout = const Duration(seconds: 15),
@@ -95,45 +117,92 @@ class ConvAiConfig {
 
   /// Builds configuration from dart-defines merged with explicit overrides.
   ///
-  /// Explicit arguments win over environment values. Throws
-  /// [ConvAiConfigException] when neither an API key nor a signed URL is
-  /// available, or when direct mode lacks an agent id.
+  /// Explicit arguments win over environment values. Signed-URL and
+  /// short-lived-token credentials are preferred; a reusable API key is only
+  /// accepted when [allowInsecureApiKey] is explicitly true (dev-only), and
+  /// activating it logs a loud security warning. Throws
+  /// [ConvAiConfigException] when no usable credential combination is
+  /// available.
   factory ConvAiConfig.fromEnvironment({
-    String? apiKey,
     String? signedUrl,
+    String? token,
+    String? apiKey,
     String? agentId,
+    bool allowInsecureApiKey = false,
   }) {
-    final effectiveKey = _trimmed(apiKey ?? _envApiKey);
+    // Signed URLs are provisioned per-session by the host backend and passed
+    // explicitly; tokens arrive via parameter or the ELEVENLABS_TOKEN define.
     final effectiveSignedUrl = _trimmed(signedUrl ?? '');
+    final effectiveToken = _trimmed(token ?? _envToken);
     final effectiveAgentId = _trimmed(agentId ?? _envAgentId);
+    final effectiveKey = _trimmed(apiKey ?? _envApiKey);
 
-    if (effectiveSignedUrl.isEmpty && effectiveKey.isEmpty) {
-      throw const ConvAiConfigException(
-        'No ElevenLabs credentials found. Pass apiKey or signedUrl explicitly, '
-        'or provide them at build time with '
-        '--dart-define=ELEVENLABS_API_KEY=<key> '
-        '(and --dart-define=ELEVENLABS_AGENT_ID=<agentId>).',
+    if (effectiveSignedUrl.isEmpty && effectiveToken.isNotEmpty) {
+      return ConvAiConfig(
+        token: effectiveToken,
+        agentId: effectiveAgentId,
+        endpoint: _endpointOverride(),
       );
     }
-    if (effectiveSignedUrl.isEmpty && effectiveAgentId.isEmpty) {
-      throw const ConvAiConfigException(
-        'Direct API-key authentication requires an agent id. Pass agentId '
-        'explicitly or provide it with --dart-define=ELEVENLABS_AGENT_ID=<id>.',
+    if (effectiveSignedUrl.isNotEmpty) {
+      return ConvAiConfig(
+        signedUrl: effectiveSignedUrl,
+        agentId: effectiveAgentId,
       );
     }
 
-    return ConvAiConfig(
-      apiKey: effectiveKey,
-      signedUrl: effectiveSignedUrl,
-      agentId: effectiveAgentId,
-      endpoint: _trimmed(_envWssUrl).isEmpty
-          ? defaultEndpoint
-          : _trimmed(_envWssUrl),
+    if (effectiveKey.isNotEmpty) {
+      if (!allowInsecureApiKey) {
+        throw const ConvAiConfigException(
+          'Refusing to embed a reusable ElevenLabs API key: it can be '
+          'extracted from the build and replayed outside the app. Provision '
+          'a short-lived credential instead (--dart-define='
+          'ELEVENLABS_TOKEN=<token> or a backend signed URL), or explicitly '
+          'opt in for local development with allowInsecureApiKey: true.',
+        );
+      }
+      _warnInsecureApiKey();
+      if (effectiveAgentId.isEmpty) {
+        throw const ConvAiConfigException(
+          'Direct API-key authentication requires an agent id. Pass agentId '
+          'explicitly or provide it with --dart-define=ELEVENLABS_AGENT_ID=<id>.',
+        );
+      }
+      return ConvAiConfig(
+        apiKey: effectiveKey,
+        agentId: effectiveAgentId,
+        endpoint: _endpointOverride(),
+      );
+    }
+
+    throw const ConvAiConfigException(
+      'No ElevenLabs credentials found. Pass a short-lived token or '
+      'signedUrl explicitly, or provide one at build time with '
+      '--dart-define=ELEVENLABS_TOKEN=<token> '
+      '(and optionally --dart-define=ELEVENLABS_AGENT_ID=<agentId>).',
     );
   }
 
+  /// True when a signed URL or short-lived token carries authentication.
+  bool get usesSignedCredentials => usesSignedUrl || token.isNotEmpty;
+
   /// True when the signed-URL authentication mode is active.
   bool get usesSignedUrl => signedUrl.isNotEmpty;
+
+  static String _endpointOverride() {
+    final override = _trimmed(_envWssUrl);
+    return override.isEmpty ? defaultEndpoint : override;
+  }
+
+  static void _warnInsecureApiKey() {
+    debugPrint(
+      '┌─ SECURITY WARNING ──────────────────────────────────────────────\n'
+      '│ ConvAI is using a REUSABLE ElevenLabs API key (insecure mode).\n'
+      '│ The key can be extracted from this build and replayed outside\n'
+      '│ the app. Dev use only — never ship this configuration.\n'
+      '└─────────────────────────────────────────────────────────────────',
+    );
+  }
 
   static String _trimmed(String value) => value.trim();
 }

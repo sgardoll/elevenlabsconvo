@@ -87,6 +87,7 @@ class ConvAiWebSocketClient {
   int _reconnectAttempt = 0;
   bool _shouldStayConnected = false;
   bool _disposed = false;
+  bool _openingSession = false;
   ConvAiConnectionState _state = ConvAiConnectionState.disconnected;
   Object? _lastError;
 
@@ -198,17 +199,19 @@ class ConvAiWebSocketClient {
   Future<ConversationInitiationMetadata> _openSession({
     required bool isReconnectAttempt,
   }) async {
-    _setState(
-      isReconnectAttempt
-          ? ConvAiConnectionState.reconnecting
-          : ConvAiConnectionState.connecting,
-    );
-
+    _openingSession = true;
+    Object? failure;
     try {
+      _setState(
+        isReconnectAttempt
+            ? ConvAiConnectionState.reconnecting
+            : ConvAiConnectionState.connecting,
+      );
+
       final uri = _buildSocketUri();
       final channel = openConvAiSocket(
         uri,
-        _config.usesSignedUrl ? null : <String, String>{
+        _config.usesSignedCredentials ? null : <String, String>{
           'xi-api-key': _config.apiKey,
         },
       );
@@ -233,19 +236,41 @@ class ConvAiWebSocketClient {
       _setState(ConvAiConnectionState.connected);
       return metadata;
     } on Object catch (error) {
+      failure = error;
       _lastError = error;
       await _teardownSocket();
-      if (_shouldStayConnected && isReconnectAttempt) {
-        _scheduleReconnect();
-      } else {
-        _setState(ConvAiConnectionState.disconnected);
-      }
       throw ConvAiConnectionException('Failed to open ConvAI session: $error');
+    } finally {
+      // Clear the in-flight flag BEFORE recovery bookkeeping: a failed
+      // reconnect attempt must be able to schedule its own successor, while
+      // the unexpected-close handler that observed the same drop was already
+      // suppressed by this flag — so the failure is counted exactly once.
+      _openingSession = false;
+      if (failure != null) {
+        if (_shouldStayConnected && isReconnectAttempt) {
+          _scheduleReconnect();
+        } else {
+          _setState(ConvAiConnectionState.disconnected);
+        }
+      }
     }
   }
 
   Uri _buildSocketUri() {
-    final rawUri = _config.usesSignedUrl ? _config.signedUrl : _config.endpoint;
+    if (_config.usesSignedUrl) {
+      return Uri.parse(_config.signedUrl);
+    }
+    if (_config.token.isNotEmpty) {
+      final uri = Uri.parse(_config.endpoint);
+      return uri.replace(
+        queryParameters: <String, dynamic>{
+          ...uri.queryParameters,
+          'token': _config.token,
+          if (_config.agentId.isNotEmpty) 'agent_id': _config.agentId,
+        },
+      );
+    }
+    final rawUri = _config.endpoint;
     final uri = Uri.parse(rawUri);
     if (uri.scheme != 'wss' && uri.scheme != 'ws') {
       throw ArgumentError.value(
@@ -253,9 +278,6 @@ class ConvAiWebSocketClient {
         'endpoint',
         'Expected a ws:// or wss:// WebSocket URI.',
       );
-    }
-    if (_config.usesSignedUrl) {
-      return uri;
     }
     return uri.replace(
       queryParameters: <String, dynamic>{
@@ -289,8 +311,19 @@ class ConvAiWebSocketClient {
     _scheduleReconnect();
   }
 
+  /// Schedules the next reconnect attempt with exponential backoff.
+  ///
+  /// Idempotent: an unexpected close and the handshake-failure path can both
+  /// observe the same drop (a socket dying before the initiation handshake
+  /// completes), but only the first call wins — any later call while a retry
+  /// is already pending is ignored. While a session open is still in flight
+  /// it owns recovery entirely, so the same failure is counted exactly once,
+  /// competing sessions are never spawned, and retries cannot exhaust early.
   void _scheduleReconnect() {
     if (_disposed || !_shouldStayConnected) return;
+    if (_openingSession) return; // In-flight open schedules the next attempt.
+    final pending = _reconnectTimer;
+    if (pending != null && pending.isActive) return;
     if (_reconnectAttempt >= _config.maxReconnectAttempts) {
       _shouldStayConnected = false;
       _setState(ConvAiConnectionState.disconnected);
@@ -302,7 +335,12 @@ class ConvAiWebSocketClient {
     _setState(ConvAiConnectionState.reconnecting);
 
     _reconnectTimer = Timer(delay, () async {
+      _reconnectTimer = null;
       if (_disposed || !_shouldStayConnected) return;
+      // Never overlap session opens: an in-flight attempt (still awaiting
+      // its connect/handshake timeout) owns recovery and will schedule the
+      // next retry itself.
+      if (_openingSession) return;
       try {
         await _openSession(isReconnectAttempt: true);
       } on ConvAiConnectionException {
@@ -328,7 +366,9 @@ class ConvAiWebSocketClient {
     _channel = null;
     if (channel != null) {
       try {
-        await channel.sink.close(ws_status.goingAway);
+        // normalClosure (1000) is the only standard code every backend
+        // accepts; goingAway (1001) is rejected by web_socket_channel.
+        await channel.sink.close(ws_status.normalClosure);
       } on Object {
         // Socket may already be dead; teardown must never throw.
       }
