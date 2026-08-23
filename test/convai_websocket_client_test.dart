@@ -88,6 +88,8 @@ ConvAiWebSocketClient _clientFor(
       token: token,
       agentId: 'agent_test',
       endpoint: endpoint.toString(),
+      // Loopback test sockets are plaintext ws://; opt in explicitly.
+      allowInsecureTransport: true,
       connectTimeout: connectTimeout,
       initiationTimeout: initiationTimeout,
       responseTimeout: responseTimeout,

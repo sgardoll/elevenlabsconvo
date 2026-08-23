@@ -121,14 +121,31 @@ class ConvAiService {
   /// protocol-event handler is the single owner of message appending, so each
   /// `agent_response` / `user_transcript` event produces exactly one bubble
   /// instead of duplicating what this completion path used to add again.
+  ///
+  /// Typed turns are tracked per send: when the server answers without ever
+  /// emitting a `user_transcript` for the submitted text, this method appends
+  /// the locally submitted text once on completion, so a typed turn can no
+  /// longer vanish from the transcript.
   Future<String> sendTextMessage(String text) async {
     final client = _client;
     if (client == null || !client.isConnected) {
       return 'error: Not connected';
     }
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) {
+      return 'error: Message must not be empty.';
+    }
+    final turn = _registerTypedTurn(trimmed);
     try {
-      return await client.sendMessage(text);
+      final reply = await client.sendMessage(text);
+      // Server answered: append the typed text iff no user_transcript echo
+      // already produced its bubble.
+      _settleTypedTurn(turn);
+      return reply;
     } on Object catch (error) {
+      // Unanswered turn: no transcript entry — the server may never have
+      // received the text.
+      _pendingTypedTurns.remove(turn);
       debugPrint('Error sending text message: $error');
       return 'error: $error';
     }
@@ -152,16 +169,56 @@ class ConvAiService {
   }
 
   /// Single owner of chat-bubble appending: every protocol event appends at
-  /// most one message, and completion paths never do.
+  /// most one message, and completion paths never do — except the typed-turn
+  /// fallback in [_settleTypedTurn] for sends the server never echoed.
   void _onProtocolEvent(ConvAiEvent event) {
     _eventController.add(event);
     switch (event) {
       case final AgentResponse response:
         _appendMessage(type: 'agent', content: response.text);
       case final UserTranscript transcript:
+        _noteUserEcho(transcript.text);
         _appendMessage(type: 'user', content: transcript.text);
       default:
         break;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Typed-turn echo bookkeeping
+  // ---------------------------------------------------------------------------
+
+  final List<_PendingTypedTurn> _pendingTypedTurns = <_PendingTypedTurn>[];
+
+  /// Registers a typed send so its user-side echo can be matched against the
+  /// locally submitted text. Voice turns never register one, so their
+  /// transcripts always flow through the plain append path.
+  _PendingTypedTurn _registerTypedTurn(String text) {
+    final turn = _PendingTypedTurn(text);
+    _pendingTypedTurns.add(turn);
+    return turn;
+  }
+
+  /// Appends the typed text exactly once when the server answered without
+  /// emitting a `user_transcript` echo for this turn. Echoed turns already
+  /// produced their bubble through the normal event path.
+  void _settleTypedTurn(_PendingTypedTurn turn) {
+    _pendingTypedTurns.remove(turn);
+    if (!turn.echoed) {
+      _appendMessage(type: 'user', content: turn.text);
+    }
+  }
+
+  /// Marks the oldest unmatched pending typed turn satisfied when the server
+  /// echoes its text back, so [_settleTypedTurn] won't append it a second
+  /// time. Unmatched transcripts (voice input) are ignored here.
+  void _noteUserEcho(String transcriptText) {
+    final echoedText = transcriptText.trim();
+    for (final turn in _pendingTypedTurns) {
+      if (!turn.echoed && turn.text == echoedText) {
+        turn.echoed = true;
+        return;
+      }
     }
   }
 
@@ -194,4 +251,16 @@ class ConvAiService {
     final trimmed = value.trim();
     return trimmed.isEmpty ? null : trimmed;
   }
+}
+
+/// A typed send awaiting its user-side echo.
+class _PendingTypedTurn {
+  _PendingTypedTurn(this.text);
+
+  /// The locally submitted text, as it should appear in the transcript.
+  final String text;
+
+  /// Set when a matching `user_transcript` arrived — the echo already
+  /// produced the chat bubble.
+  bool echoed = false;
 }

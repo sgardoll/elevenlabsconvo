@@ -83,6 +83,15 @@ class ConvAiConfig {
   /// WebSocket endpoint. Ignored in signed-URL mode (the URL carries its own).
   final String endpoint;
 
+  /// Explicit dev-only opt-in for plaintext `ws://` transports.
+  ///
+  /// Credentials (short-lived tokens in the URL/query or the reusable
+  /// `xi-api-key` header) cross a plaintext socket readable and tamperable by
+  /// anything on the network path, so non-wss endpoints are refused unless
+  /// this flag is true — mirroring [fromEnvironment]'s
+  /// `allowInsecureApiKey` gate. Never ship it enabled.
+  final bool allowInsecureTransport;
+
   /// Max time to establish the TCP/TLS/upgrade handshake.
   final Duration connectTimeout;
 
@@ -107,6 +116,7 @@ class ConvAiConfig {
     this.token = '',
     this.agentId = '',
     this.endpoint = defaultEndpoint,
+    this.allowInsecureTransport = false,
     this.connectTimeout = const Duration(seconds: 15),
     this.initiationTimeout = const Duration(seconds: 15),
     this.responseTimeout = const Duration(seconds: 45),
@@ -189,6 +199,25 @@ class ConvAiConfig {
   /// True when the signed-URL authentication mode is active.
   bool get usesSignedUrl => signedUrl.isNotEmpty;
 
+  /// Guards credential-bearing sockets: refuses any non-`wss` transport
+  /// unless [allowInsecureTransport] opted in, and warns loudly when it did.
+  ///
+  /// Every mode carries credentials on the wire — a token in the query or
+  /// signed URL, or the reusable API key in the `xi-api-key` upgrade header —
+  /// so plaintext `ws://` is rejected by default.
+  void ensureSecureTransport(Uri uri) {
+    if (uri.scheme == 'wss') return;
+    if (!allowInsecureTransport) {
+      throw ConvAiConfigException(
+        'Refusing to send ConvAI credentials over plaintext ws:// ($uri): '
+        'anything on the network path can read or tamper with them. Use a '
+        'wss:// endpoint, or opt in explicitly for local development with '
+        'allowInsecureTransport: true.',
+      );
+    }
+    _warnInsecureTransport(uri);
+  }
+
   static String _endpointOverride() {
     final override = _trimmed(_envWssUrl);
     return override.isEmpty ? defaultEndpoint : override;
@@ -200,6 +229,16 @@ class ConvAiConfig {
       '│ ConvAI is using a REUSABLE ElevenLabs API key (insecure mode).\n'
       '│ The key can be extracted from this build and replayed outside\n'
       '│ the app. Dev use only — never ship this configuration.\n'
+      '└─────────────────────────────────────────────────────────────────',
+    );
+  }
+
+  static void _warnInsecureTransport(Uri uri) {
+    debugPrint(
+      '┌─ SECURITY WARNING ──────────────────────────────────────────────\n'
+      '│ ConvAI is sending credentials over PLAINTEXT ws:// ($uri).\n'
+      '│ Anything on the network path can read or tamper with them.\n'
+      '│ Dev use only — never ship this configuration.\n'
       '└─────────────────────────────────────────────────────────────────',
     );
   }

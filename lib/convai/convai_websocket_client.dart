@@ -235,6 +235,15 @@ class ConvAiWebSocketClient {
       _reconnectAttempt = 0;
       _setState(ConvAiConnectionState.connected);
       return metadata;
+    } on ConvAiConfigException catch (error) {
+      // Configuration mistakes surface typed and terminal: wrapping them as
+      // a connection failure would misclassify a setup problem and invite
+      // pointless reconnect loops against an endpoint that can never succeed.
+      _shouldStayConnected = false;
+      failure = error;
+      _lastError = error;
+      await _teardownSocket();
+      rethrow;
     } on Object catch (error) {
       failure = error;
       _lastError = error;
@@ -257,34 +266,40 @@ class ConvAiWebSocketClient {
   }
 
   Uri _buildSocketUri() {
+    final Uri uri;
     if (_config.usesSignedUrl) {
-      return Uri.parse(_config.signedUrl);
-    }
-    if (_config.token.isNotEmpty) {
-      final uri = Uri.parse(_config.endpoint);
-      return uri.replace(
+      uri = Uri.parse(_config.signedUrl);
+    } else if (_config.token.isNotEmpty) {
+      final parsed = Uri.parse(_config.endpoint);
+      uri = parsed.replace(
         queryParameters: <String, dynamic>{
-          ...uri.queryParameters,
+          ...parsed.queryParameters,
           'token': _config.token,
           if (_config.agentId.isNotEmpty) 'agent_id': _config.agentId,
         },
       );
-    }
-    final rawUri = _config.endpoint;
-    final uri = Uri.parse(rawUri);
-    if (uri.scheme != 'wss' && uri.scheme != 'ws') {
-      throw ArgumentError.value(
-        rawUri,
-        'endpoint',
-        'Expected a ws:// or wss:// WebSocket URI.',
+    } else {
+      final rawUri = _config.endpoint;
+      final parsed = Uri.parse(rawUri);
+      if (parsed.scheme != 'wss' && parsed.scheme != 'ws') {
+        throw ArgumentError.value(
+          rawUri,
+          'endpoint',
+          'Expected a ws:// or wss:// WebSocket URI.',
+        );
+      }
+      uri = parsed.replace(
+        queryParameters: <String, dynamic>{
+          ...parsed.queryParameters,
+          'agent_id': _config.agentId,
+        },
       );
     }
-    return uri.replace(
-      queryParameters: <String, dynamic>{
-        ...uri.queryParameters,
-        'agent_id': _config.agentId,
-      },
-    );
+    // Every mode puts credentials on the wire — token/signed-URL in the query
+    // or the reusable key in the xi-api-key header — so the transport is
+    // guarded exactly once, on the URI actually opened.
+    _config.ensureSecureTransport(uri);
+    return uri;
   }
 
   void _listen(WebSocketChannel channel) {
