@@ -333,37 +333,73 @@ void main() {
       expect(await client.sendMessage('hello'), 'echo: hello');
     });
 
-    test('exhausted response retries surface the detailed TimeoutException',
-        () async {
+    test('a timed-out turn throws detailed, refunds the budget, never '
+        'auto-resends, and a fresh send works', () async {
       final endpoint = Uri.parse(await server.start());
-      // Handshake completes, but the server never answers user messages.
+      var userMessages = 0;
       server.onConnection = (socket, index) {
         _TestConvAiServer._completeHandshake(socket, 'conv_$index');
+      };
+      server.onMessage = (socket, data) {
+        final frame = jsonDecode(data as String) as Map<String, dynamic>;
+        if (frame['type'] != 'user_message') return;
+        userMessages += 1;
+        // Only the SECOND send (the caller-driven retry) gets an answer; the
+        // first must time out.
+        if (userMessages == 2) {
+          socket.add(jsonEncode(<String, dynamic>{
+            'type': 'agent_response',
+            'agent_response_event': {
+              'agent_response': 'echo: again',
+              'event_id': 2,
+            },
+          }));
+        }
       };
 
       final client = _clientFor(
         endpoint,
         responseTimeout: const Duration(milliseconds: 80),
+        maxSessionTurns: 1,
       );
       addTearDown(client.dispose);
 
       await client.connect();
+
+      // The turn fails immediately with a detailed TimeoutException carrying
+      // the exact window and attempt count.
       await expectLater(
         client.sendMessage('hello'),
         throwsA(
-          isA<TimeoutException>().having(
-            (error) => error.message,
-            'message',
-            contains('2 attempts'),
-          ),
+          isA<TimeoutException>()
+              .having((error) => error.message, 'message',
+                  contains('1 attempt'))
+              .having((error) => error.duration, 'duration',
+                  const Duration(milliseconds: 80)),
         ),
       );
       // The detailed exception is also what the client records.
       expect(
         client.lastError,
-        isA<TimeoutException>()
-            .having((error) => error.message, 'message', contains('2 attempts')),
+        isA<TimeoutException>().having(
+          (error) => error.message,
+          'message',
+          contains('1 attempt'),
+        ),
       );
+
+      // No in-client transparent resend: well past two timeout windows, the
+      // server has seen exactly one user_message.
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(userMessages, 1);
+
+      // The timed-out turn was refunded — a cap of 1 would otherwise block
+      // the retry with ConvAiRateLimitException — so a fresh caller-driven
+      // send succeeds and pays exactly one charge.
+      expect(client.remainingTurns, 1);
+      expect(await client.sendMessage('again'), 'echo: again');
+      expect(client.remainingTurns, 0);
+      expect(userMessages, 2);
     });
 
     test('turn budget persists per conversation and resets for new ones',

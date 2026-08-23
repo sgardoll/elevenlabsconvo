@@ -7,8 +7,8 @@
 /// - Perform the initiation handshake and capture the server `conversation_id`.
 /// - Maintain a persisted local session UUID per conversation.
 /// - Encode user text messages and complete round-trips when the matching
-///   `agent_response` arrives, retrying an unanswered send exactly
-///   [ConvAiConfig.maxResponseRetries] times before failing the turn.
+///   `agent_response` arrives; a timed-out turn fails immediately and
+///   resending is the caller's decision.
 /// - Auto-reconnect an established session with exponential backoff + jitter,
 /// - Enforce connect / handshake / response timeouts.
 /// - Enforce the per-conversation turn budget ([ConvAiConfig.maxSessionTurns]),
@@ -156,11 +156,13 @@ class ConvAiWebSocketClient {
   /// the matching `agent_response` event arrives.
   ///
   /// Concurrent calls are serialized; each resolves against its own turn.
-  /// An unanswered send is retried automatically up to
-  /// [ConvAiConfig.maxResponseRetries] times before the turn fails with
-  /// [TimeoutException]. Throws [ConvAiRateLimitException] once the session's
-  /// turn budget is exhausted, and [StateError] when the connection drops
-  /// before the exchange completes.
+  /// Throws [TimeoutException] — carrying the elapsed window and attempt
+  /// count — when no response arrives within [ConvAiConfig.responseTimeout];
+  /// resend by calling [sendMessage] again (each call is its own turn, with a
+  /// fresh generation and budget charge; a timed-out turn is refunded).
+  /// Throws [ConvAiRateLimitException] once the session's turn budget is
+  /// exhausted, and [StateError] when the connection drops before the
+  /// exchange completes.
   Future<String> sendMessage(String text) {
     if (!_shouldStayConnected) {
       throw StateError('sendMessage called before connect().');
@@ -487,12 +489,21 @@ class ConvAiWebSocketClient {
   // ---------------------------------------------------------------------------
 
   /// Enforces the turn budget, consumes one turn, persists the count, then
-  /// performs the exchange (with timeout retries).
+  /// performs the exchange. A timed-out exchange refunds its turn so a
+  /// caller-driven retry via a fresh [sendMessage] is not double-charged.
   Future<String> _guardedRoundTrip(String text) async {
     _turnLimiter.ensureCanSend();
     _turnLimiter.recordTurn();
     await _persistTurnCount();
-    return _roundTrip(text);
+    try {
+      return await _roundTrip(text);
+    } on TimeoutException {
+      // The turn never produced an answer, so the budget charge returns to
+      // the caller before the retry send is counted as its own turn.
+      _turnLimiter.refundTurn();
+      await _persistTurnCount();
+      rethrow;
+    }
   }
 
   /// Conversation whose budget this client is tracking: the server
@@ -506,43 +517,37 @@ class ConvAiWebSocketClient {
     await store.saveTurnCount(scopeId, _turnLimiter.turnsUsed);
   }
 
+  /// One physical send per call: replies correlate to exactly one wait via
+  /// the send generation, so response identity can never be ambiguous. A
+  /// timed-out turn throws immediately; resending is the CALLER's decision
+  /// via a fresh [sendMessage], which takes a fresh generation and a fresh
+  /// budget charge — an in-client transparent resend cannot tell whether a
+  /// late reply answers the original or the resent text.
   Future<String> _roundTrip(String text) async {
-    var attempt = 0;
-    while (true) {
-      final completer = Completer<AgentResponse>();
-      // Each physical send owns a fresh generation, so replies are attributed
-      // to exactly one wait and a resend can never inherit the timed-out
-      // attempt's pending state.
-      final generation = ++_sendGeneration;
-      _responseCompleter = completer;
-      _responseGeneration = generation;
-      try {
-        _sendOrDrop(ConvAiEventCodec.encodeUserMessage(text));
-        final response =
-            await completer.future.timeout(_config.responseTimeout);
-        return response.text;
-      } on TimeoutException {
-        // Detach BEFORE retry bookkeeping: a late reply to this timed-out
-        // send must never satisfy the next wait nor re-complete a resolved
-        // slot inside the socket listener.
-        _detachResponseSlot(completer);
-        attempt += 1;
-        if (attempt > _config.maxResponseRetries) {
-          final attempts = attempt;
-          final detailed = TimeoutException(
-            'No agent_response within '
-            '${_config.responseTimeout.inSeconds}s '
-            '($attempts ${attempts == 1 ? 'attempt' : 'attempts'}).',
-            _config.responseTimeout,
-          );
-          _lastError = detailed;
-          throw detailed;
-        }
-        // One identical resend of the same turn; the budget was already
-        // consumed once and a retry is not a new turn.
-      } finally {
-        _detachResponseSlot(completer);
-      }
+    final completer = Completer<AgentResponse>();
+    final generation = ++_sendGeneration;
+    _responseCompleter = completer;
+    _responseGeneration = generation;
+    try {
+      _sendOrDrop(ConvAiEventCodec.encodeUserMessage(text));
+      final response =
+          await completer.future.timeout(_config.responseTimeout);
+      return response.text;
+    } on TimeoutException {
+      const attempts = 1;
+      final detailed = TimeoutException(
+        'No agent_response within '
+        '${_config.responseTimeout.inSeconds}s '
+        '($attempts ${attempts == 1 ? 'attempt' : 'attempts'}).',
+        _config.responseTimeout,
+      );
+      _lastError = detailed;
+      throw detailed;
+    } finally {
+      // Detach BEFORE the failure propagates: a late reply to this timed-out
+      // send must never satisfy a later wait nor re-complete a resolved slot
+      // inside the socket listener.
+      _detachResponseSlot(completer);
     }
   }
 

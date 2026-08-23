@@ -25,8 +25,9 @@ class ConvAiRateLimitException implements Exception {
 
 /// Counts dispatched user turns against a fixed per-session budget.
 ///
-/// A *turn* is one user-initiated exchange. Timeout retries of the same turn
-/// do not consume extra budget — only new sends do.
+/// A *turn* is one user-initiated exchange. A send that times out refunds
+/// its charge (it never produced an answer), so the caller-driven retry via
+/// a fresh send pays for the exchange exactly once.
 class ConvAiTurnRateLimiter {
   ConvAiTurnRateLimiter({
     required this.maxTurns,
@@ -58,6 +59,12 @@ class ConvAiTurnRateLimiter {
   /// Consumes one turn. Call only after [ensureCanSend] passed.
   void recordTurn() {
     if (_turnsUsed < maxTurns) _turnsUsed += 1;
+  }
+
+  /// Returns one turn to the budget, clamped at zero. Used when a send times
+  /// out without an answer so a caller-driven retry is not double-charged.
+  void refundTurn() {
+    if (_turnsUsed > 0) _turnsUsed -= 1;
   }
 
   /// Restores a fresh budget (new logical session).
