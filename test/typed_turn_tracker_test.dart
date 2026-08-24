@@ -139,12 +139,61 @@ void main() {
     });
   });
 
+  group('TypedTurnTracker suppression lifetime (turn-cycle scoped)', () {
+    test('a later identical phrase in the same session appends its bubble',
+        () {
+      final tracker = TypedTurnTracker();
+      final first = tracker.registerTypedTurn('hello');
+      // Response-first ordering leaves a suppression record behind.
+      expect(tracker.settleTypedTurn(first), isTrue);
+      expect(tracker.retainedFallbackTextCount, 1);
+
+      // A new turn cycle begins; the stale record must be dropped, so this
+      // later identical phrase is NOT swallowed (the Greptile P1).
+      final second = tracker.registerTypedTurn('how are you');
+      expect(tracker.noteUserTranscript('hello'), isTrue,
+          reason: 'Suppression must not outlive its turn cycle.');
+      expect(tracker.noteUserTranscript('how are you'), isTrue);
+      expect(tracker.settleTypedTurn(second), isFalse);
+      expect(tracker.retainedFallbackTextCount, 0);
+    });
+
+    test('suppression never crosses teardown / new-conversation boundaries',
+        () {
+      final tracker = TypedTurnTracker();
+      final turn = tracker.registerTypedTurn('hello');
+      expect(tracker.settleTypedTurn(turn), isTrue);
+      expect(tracker.retainedFallbackTextCount, 1);
+
+      // ConvAiService calls clear() on teardown/disconnect and on
+      // new-conversation initialization.
+      tracker.clear();
+
+      expect(tracker.pendingCount, 0);
+      expect(tracker.retainedFallbackTextCount, 0);
+      expect(tracker.noteUserTranscript('hello'), isTrue,
+          reason: 'A fresh session must never inherit suppression.');
+    });
+
+    test('records expire once older than maxSuppressionAgeTicks', () {
+      final tracker = TypedTurnTracker(maxSuppressionAgeTicks: 1);
+      final turn = tracker.registerTypedTurn('hello');
+      expect(tracker.settleTypedTurn(turn), isTrue);
+      // Same tick as registration: the late echo is still suppressed.
+      expect(tracker.noteUserTranscript('hello'), isFalse);
+
+      final agedOut = TypedTurnTracker(maxSuppressionAgeTicks: 0);
+      final stale = agedOut.registerTypedTurn('stale');
+      expect(agedOut.settleTypedTurn(stale), isTrue);
+      expect(agedOut.noteUserTranscript('stale'), isTrue,
+          reason: 'Aged-out records must stop suppressing phrases.');
+    });
+  });
+
   group('TypedTurnTracker long-session pruning', () {
-    test('settled turns drain from the pending set and fallback records '
-        'stay capped', () {
-      const retentionCap = 8;
-      final tracker =
-          TypedTurnTracker(maxRetainedFallbackTexts: retentionCap);
+    test('settled turns drain from the pending set and suppression drains '
+        'every turn cycle', () {
+      final tracker = TypedTurnTracker();
 
       const sessionLength = 500;
       var peakPending = 0;
@@ -155,21 +204,48 @@ void main() {
         peakPending =
             peakPending > tracker.pendingCount ? peakPending : tracker
                 .pendingCount;
+        // Registering opened a fresh cycle: nothing may have leaked in.
+        expect(tracker.retainedFallbackTextCount, 0,
+            reason: 'Suppression must not survive into a new turn cycle.');
         if (i.isEven) {
-          // Response-first ordering leaves a suppression record behind.
+          // Response-first ordering leaves one suppression record behind...
           expect(tracker.settleTypedTurn(turn), isTrue);
+          expect(tracker.retainedFallbackTextCount, 1);
         } else {
-          // Transcript-first ordering prunes immediately.
+          // ...and transcript-first ordering creates none.
           expect(tracker.noteUserTranscript('turn $i'), isTrue);
           expect(tracker.settleTypedTurn(turn), isFalse);
+          expect(tracker.retainedFallbackTextCount, 0);
         }
       }
 
       expect(peakPending, 1,
           reason: 'Each turn must be pruned as soon as it settles.');
       expect(tracker.pendingCount, 0);
+      expect(tracker.retainedFallbackTextCount, 0,
+          reason: 'The final transcript-first cycle leaves no records.');
+    });
+
+    test('same-cycle settlement bursts stay capped, then drain on the next '
+        'cycle', () {
+      const retentionCap = 3;
+      final tracker = TypedTurnTracker(maxRetainedFallbackTexts: retentionCap);
+
+      // Concurrent sends all register before any settles: their records
+      // accumulate within ONE turn cycle and hit the cap.
+      final turns = List.generate(
+        retentionCap + 2,
+        (i) => tracker.registerTypedTurn('burst $i'),
+      );
+      for (final turn in turns) {
+        expect(tracker.settleTypedTurn(turn), isTrue);
+      }
       expect(tracker.retainedFallbackTextCount, retentionCap,
-          reason: 'Fallback records must stay bounded by the cap.');
+          reason: 'Bursts must stay bounded by the retention cap.');
+
+      // The next registration opens a cycle and drains them all.
+      tracker.registerTypedTurn('after the burst');
+      expect(tracker.retainedFallbackTextCount, 0);
     });
   });
 }

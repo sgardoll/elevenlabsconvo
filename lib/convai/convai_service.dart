@@ -52,32 +52,31 @@ class ConvAiService {
   /// Creates a client from explicit values (falling back to dart-defines) and
   /// opens a session.
   ///
-  /// Signed-URL / short-lived-token credentials are preferred. Passing an
-  /// [apiKey] additionally requires [allowInsecureApiKey]: true — a reusable
-  /// key embedded in a distributed build can be extracted and replayed
-  /// outside the app, so that mode is dev-only.
+  /// ONLY backend-provisioned temporary credentials are accepted: a
+  /// short-lived [token] or a backend [signedUrl]. Reusable API keys are
+  /// never accepted here — they can be extracted from a distributed build
+  /// and replayed outside the app.
   ///
   /// Returns `'success'` on connection, or `'error: <reason>'` following the
   /// existing action convention. Missing credentials produce a descriptive
   /// error naming the required dart-defines.
   Future<String> initialize({
     required String agentId,
-    String apiKey = '',
     String signedUrl = '',
     String token = '',
-    bool allowInsecureApiKey = false,
   }) async {
     try {
       debugPrint('Initializing ConvAI WebSocket service');
       final config = ConvAiConfig.fromEnvironment(
-        apiKey: _blankToNull(apiKey),
         signedUrl: _blankToNull(signedUrl),
         token: _blankToNull(token),
         agentId: _blankToNull(agentId),
-        allowInsecureApiKey: allowInsecureApiKey,
       );
 
       await _teardownClient();
+      // New conversation: no typed-turn state from any previous session may
+      // survive into it.
+      _typedTurns.clear();
 
       final client = ConvAiWebSocketClient(
         config: config,
@@ -216,6 +215,9 @@ class ConvAiService {
     _eventSubscription?.cancel();
     _stateSubscription = null;
     _eventSubscription = null;
+    // Teardown ends the turn cycle: suppression records must never outlive
+    // their session, or a later identical phrase would be swallowed.
+    _typedTurns.clear();
     final client = _client;
     _client = null;
     await client?.dispose();

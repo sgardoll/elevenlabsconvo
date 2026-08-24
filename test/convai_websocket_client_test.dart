@@ -82,22 +82,35 @@ ConvAiWebSocketClient _clientFor(
   Duration maxBackoff = const Duration(milliseconds: 40),
   int maxReconnectAttempts = 3,
 }) {
-  return ConvAiWebSocketClient(
-    config: ConvAiConfig(
-      apiKey: token.isEmpty ? 'test-key' : '',
-      token: token,
-      agentId: 'agent_test',
-      endpoint: endpoint.toString(),
-      // Loopback test sockets are plaintext ws://; opt in explicitly.
-      allowInsecureTransport: true,
-      connectTimeout: connectTimeout,
-      initiationTimeout: initiationTimeout,
-      responseTimeout: responseTimeout,
-      initialBackoff: initialBackoff,
-      maxBackoff: maxBackoff,
-      maxReconnectAttempts: maxReconnectAttempts,
-    ),
-  );
+  // Direct (xi-api-key) mode exists only through the test-only factory;
+  // token mode uses the production constructor.
+  final config = token.isEmpty
+      ? ConvAiConfig.forTesting(
+          apiKey: 'test-key',
+          agentId: 'agent_test',
+          endpoint: endpoint.toString(),
+          // Loopback test sockets are plaintext ws://; opt in explicitly.
+          allowInsecureTransport: true,
+          connectTimeout: connectTimeout,
+          initiationTimeout: initiationTimeout,
+          responseTimeout: responseTimeout,
+          initialBackoff: initialBackoff,
+          maxBackoff: maxBackoff,
+          maxReconnectAttempts: maxReconnectAttempts,
+        )
+      : ConvAiConfig(
+          token: token,
+          agentId: 'agent_test',
+          endpoint: endpoint.toString(),
+          allowInsecureTransport: true,
+          connectTimeout: connectTimeout,
+          initiationTimeout: initiationTimeout,
+          responseTimeout: responseTimeout,
+          initialBackoff: initialBackoff,
+          maxBackoff: maxBackoff,
+          maxReconnectAttempts: maxReconnectAttempts,
+        );
+  return ConvAiWebSocketClient(config: config);
 }
 
 Future<T> _waitFor<T>(

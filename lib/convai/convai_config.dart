@@ -11,7 +11,7 @@
 ///   --dart-define=ELEVENLABS_AGENT_ID=agent_...
 /// ```
 ///
-/// Three authentication modes are supported, in order of preference:
+/// Two authentication modes are supported, in order of preference:
 ///
 /// - **Signed URL** (default, production): the host backend provisions a
 ///   short-lived `wss://...token=...` URL; the client opens it directly.
@@ -21,25 +21,23 @@
 ///   conversation token (`ELEVENLABS_TOKEN`); the client attaches it to the
 ///   endpoint as a `token` query parameter. Short-lived by design, so a
 ///   leaked value expires quickly.
-/// - **Direct API key** (dev-only, opt-in): sends the reusable
-///   `ELEVENLABS_API_KEY` in the `xi-api-key` upgrade header. A reusable key
-///   embedded in a distributed build can be extracted and replayed outside
-///   the app, so this mode is refused unless the caller explicitly passes
-///   `allowInsecureApiKey: true`, and it logs a loud security warning when
-///   it activates. Never ship it to production.
+///
+/// REUSABLE API KEYS ARE NOT SUPPORTED AT RUNTIME. A key embedded in a
+/// distributed build can be extracted and replayed outside the app, so no
+/// public constructor accepts one. The only escape hatch is
+/// [ConvAiConfig.forTesting], which is annotated `@visibleForTesting` and
+/// therefore unusable from production code (any such use fails analysis).
 library;
 
 import 'package:flutter/foundation.dart';
 
-const String _envApiKey = String.fromEnvironment('ELEVENLABS_API_KEY');
 const String _envAgentId = String.fromEnvironment('ELEVENLABS_AGENT_ID');
 const String _envWssUrl = String.fromEnvironment('ELEVENLABS_WSS_URL');
 const String _envToken = String.fromEnvironment('ELEVENLABS_TOKEN');
 
 /// Thrown when [ConvAiConfig] cannot be built because required credentials or
-/// identifiers are missing — or because insecure API-key mode was requested
-/// without its explicit opt-in flag. The message names every missing value
-/// and how to supply it, so setup mistakes are immediately diagnosable.
+/// identifiers are missing. The message names every missing value and how to
+/// supply it, so setup mistakes are immediately diagnosable.
 class ConvAiConfigException implements Exception {
   final String message;
 
@@ -60,24 +58,24 @@ class ConvAiConfig {
 
   /// ElevenLabs API key for direct (header-based) authentication.
   ///
-  /// Reusable and extractable from distributed builds: dev-only, and only
-  /// with the explicit `allowInsecureApiKey: true` opt-in. Empty when
-  /// signed-URL or token mode is used instead.
+  /// REUSABLE AND EXTRACTABLE: settable ONLY through the test-only
+  /// [ConvAiConfig.forTesting] constructor (`@visibleForTesting` — any
+  /// production reference fails analysis). Empty in every signed-URL or
+  /// token configuration.
   final String apiKey;
 
   /// Backend-provisioned signed WebSocket URL (`wss://...token=...`).
   ///
-  /// Takes precedence over [token] and [apiKey] when non-empty.
+  /// Takes precedence over [token] when non-empty.
   final String signedUrl;
 
   /// Backend-provisioned short-lived conversation token.
   ///
-  /// Attached to [endpoint] as a `token` query parameter. Takes precedence
-  /// over [apiKey]; ignored when [signedUrl] is set.
+  /// Attached to [endpoint] as a `token` query parameter; ignored when
+  /// [signedUrl] is set.
   final String token;
 
-  /// Target ElevenLabs agent id. Required for direct API-key mode; embedded
-  /// in the connection query for token mode when present.
+  /// Target ElevenLabs agent id; embedded in the connection query.
   final String agentId;
 
   /// WebSocket endpoint. Ignored in signed-URL mode (the URL carries its own).
@@ -85,11 +83,10 @@ class ConvAiConfig {
 
   /// Explicit dev-only opt-in for plaintext `ws://` transports.
   ///
-  /// Credentials (short-lived tokens in the URL/query or the reusable
-  /// `xi-api-key` header) cross a plaintext socket readable and tamperable by
-  /// anything on the network path, so non-wss endpoints are refused unless
-  /// this flag is true — mirroring [fromEnvironment]'s
-  /// `allowInsecureApiKey` gate. Never ship it enabled.
+  /// Credentials (short-lived tokens in the URL/query, or the test-only
+  /// reusable key in the `xi-api-key` header) cross a plaintext socket
+  /// readable and tamperable by anything on the network path, so non-wss
+  /// endpoints are refused unless this flag is true. Never ship it enabled.
   final bool allowInsecureTransport;
 
   /// Max time to establish the TCP/TLS/upgrade handshake.
@@ -110,8 +107,10 @@ class ConvAiConfig {
   /// Reconnect attempts after an established session drops unexpectedly.
   final int maxReconnectAttempts;
 
+  /// Production constructor. Accepts ONLY temporary credentials — there is
+  /// deliberately NO apiKey parameter here ([apiKey] is pinned to empty;
+  /// see [ConvAiConfig.forTesting] for the single test-only escape hatch).
   const ConvAiConfig({
-    this.apiKey = '',
     this.signedUrl = '',
     this.token = '',
     this.agentId = '',
@@ -123,63 +122,56 @@ class ConvAiConfig {
     this.initialBackoff = const Duration(seconds: 1),
     this.maxBackoff = const Duration(seconds: 30),
     this.maxReconnectAttempts = 5,
-  });
+  }) : apiKey = '';
+
+  /// TEST-ONLY configuration carrying a REUSABLE API key in the
+  /// `xi-api-key` upgrade header.
+  ///
+  /// A reusable key embedded in a distributed build can be extracted and
+  /// replayed outside the app, so this constructor is `@visibleForTesting`:
+  /// referencing it from any production code fails static analysis, making
+  /// it unreachable from `lib/` — including the FlutterFlow action surface.
+  /// Never reference it outside `test/`.
+  @visibleForTesting
+  const ConvAiConfig.forTesting({
+    required this.apiKey,
+    required this.agentId,
+    this.endpoint = defaultEndpoint,
+    this.allowInsecureTransport = false,
+    this.connectTimeout = const Duration(seconds: 15),
+    this.initiationTimeout = const Duration(seconds: 15),
+    this.responseTimeout = const Duration(seconds: 45),
+    this.initialBackoff = const Duration(seconds: 1),
+    this.maxBackoff = const Duration(seconds: 30),
+    this.maxReconnectAttempts = 5,
+  })  : signedUrl = '',
+        token = '';
 
   /// Builds configuration from dart-defines merged with explicit overrides.
   ///
-  /// Explicit arguments win over environment values. Signed-URL and
-  /// short-lived-token credentials are preferred; a reusable API key is only
-  /// accepted when [allowInsecureApiKey] is explicitly true (dev-only), and
-  /// activating it logs a loud security warning. Throws
-  /// [ConvAiConfigException] when no usable credential combination is
-  /// available.
+  /// Explicit arguments win over environment values. Only backend-provisioned
+  /// temporary credentials are accepted — a short-lived [token] or [signedUrl].
+  /// Throws [ConvAiConfigException] when neither is available.
   factory ConvAiConfig.fromEnvironment({
     String? signedUrl,
     String? token,
-    String? apiKey,
     String? agentId,
-    bool allowInsecureApiKey = false,
   }) {
     // Signed URLs are provisioned per-session by the host backend and passed
     // explicitly; tokens arrive via parameter or the ELEVENLABS_TOKEN define.
     final effectiveSignedUrl = _trimmed(signedUrl ?? '');
     final effectiveToken = _trimmed(token ?? _envToken);
     final effectiveAgentId = _trimmed(agentId ?? _envAgentId);
-    final effectiveKey = _trimmed(apiKey ?? _envApiKey);
 
-    if (effectiveSignedUrl.isEmpty && effectiveToken.isNotEmpty) {
-      return ConvAiConfig(
-        token: effectiveToken,
-        agentId: effectiveAgentId,
-        endpoint: _endpointOverride(),
-      );
-    }
     if (effectiveSignedUrl.isNotEmpty) {
       return ConvAiConfig(
         signedUrl: effectiveSignedUrl,
         agentId: effectiveAgentId,
       );
     }
-
-    if (effectiveKey.isNotEmpty) {
-      if (!allowInsecureApiKey) {
-        throw const ConvAiConfigException(
-          'Refusing to embed a reusable ElevenLabs API key: it can be '
-          'extracted from the build and replayed outside the app. Provision '
-          'a short-lived credential instead (--dart-define='
-          'ELEVENLABS_TOKEN=<token> or a backend signed URL), or explicitly '
-          'opt in for local development with allowInsecureApiKey: true.',
-        );
-      }
-      _warnInsecureApiKey();
-      if (effectiveAgentId.isEmpty) {
-        throw const ConvAiConfigException(
-          'Direct API-key authentication requires an agent id. Pass agentId '
-          'explicitly or provide it with --dart-define=ELEVENLABS_AGENT_ID=<id>.',
-        );
-      }
+    if (effectiveToken.isNotEmpty) {
       return ConvAiConfig(
-        apiKey: effectiveKey,
+        token: effectiveToken,
         agentId: effectiveAgentId,
         endpoint: _endpointOverride(),
       );
@@ -189,7 +181,8 @@ class ConvAiConfig {
       'No ElevenLabs credentials found. Pass a short-lived token or '
       'signedUrl explicitly, or provide one at build time with '
       '--dart-define=ELEVENLABS_TOKEN=<token> '
-      '(and optionally --dart-define=ELEVENLABS_AGENT_ID=<agentId>).',
+      '(and optionally --dart-define=ELEVENLABS_AGENT_ID=<agentId>). '
+      'Reusable API keys are not accepted at runtime.',
     );
   }
 
@@ -203,7 +196,7 @@ class ConvAiConfig {
   /// unless [allowInsecureTransport] opted in, and warns loudly when it did.
   ///
   /// Every mode carries credentials on the wire — a token in the query or
-  /// signed URL, or the reusable API key in the `xi-api-key` upgrade header —
+  /// signed URL, or the test-only reusable key in the `xi-api-key` header —
   /// so plaintext `ws://` is rejected by default.
   void ensureSecureTransport(Uri uri) {
     if (uri.scheme == 'wss') return;
@@ -221,16 +214,6 @@ class ConvAiConfig {
   static String _endpointOverride() {
     final override = _trimmed(_envWssUrl);
     return override.isEmpty ? defaultEndpoint : override;
-  }
-
-  static void _warnInsecureApiKey() {
-    debugPrint(
-      '┌─ SECURITY WARNING ──────────────────────────────────────────────\n'
-      '│ ConvAI is using a REUSABLE ElevenLabs API key (insecure mode).\n'
-      '│ The key can be extracted from this build and replayed outside\n'
-      '│ the app. Dev use only — never ship this configuration.\n'
-      '└─────────────────────────────────────────────────────────────────',
-    );
   }
 
   static void _warnInsecureTransport(Uri uri) {

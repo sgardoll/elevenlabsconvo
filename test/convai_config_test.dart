@@ -26,75 +26,61 @@ void main() {
 
     test('blank values fall back to other modes', () {
       final config = ConvAiConfig.fromEnvironment(
-        apiKey: '',
         signedUrl: '',
         token: '  tok_123  ',
       );
 
       expect(config.token, 'tok_123');
     });
+
+    test('token mode leaves no reusable key anywhere', () {
+      final config = ConvAiConfig.fromEnvironment(
+        signedUrl: '',
+        token: 'tok_123',
+      );
+
+      expect(config.apiKey, isEmpty);
+      expect(config.signedUrl, isEmpty);
+      expect(config.usesSignedCredentials, isTrue);
+    });
   });
 
-  group('ConvAiConfig.fromEnvironment insecure API-key gate', () {
-    test('refuses a reusable API key without explicit opt-in', () {
+  group('ConvAiConfig runtime surface rejects reusable keys', () {
+    test('fromEnvironment accepts only temporary credentials and names '
+        'them in its error', () {
       expect(
-        () => ConvAiConfig.fromEnvironment(
-          apiKey: 'sk_dev_key',
-          agentId: 'agent_1',
-        ),
+        () => ConvAiConfig.fromEnvironment(),
         throwsA(
           isA<ConvAiConfigException>().having(
             (error) => error.message,
             'message',
-            contains('allowInsecureApiKey'),
+            contains('Reusable API keys are not accepted at runtime'),
           ),
         ),
       );
     });
 
-    test('refuses a reusable API key even from dart-defines without opt-in',
-        () {
-      // ELEVENLABS_API_KEY is empty in tests; simulate an explicit value via
-      // the parameter — the gate must behave identically.
-      expect(
-        () => ConvAiConfig.fromEnvironment(apiKey: 'sk_dev_key'),
-        throwsA(isA<ConvAiConfigException>()),
-      );
-    });
-
-    test('explicit opt-in activates dev-only direct mode', () {
-      final config = ConvAiConfig.fromEnvironment(
-        apiKey: 'sk_dev_key',
+    test('the reusable key is reachable ONLY through the @visibleForTesting '
+        'constructor', () {
+      final config = ConvAiConfig.forTesting(
+        apiKey: 'sk_test_key',
         agentId: 'agent_1',
-        allowInsecureApiKey: true,
       );
 
-      expect(config.apiKey, 'sk_dev_key');
+      expect(config.apiKey, 'sk_test_key');
       expect(config.agentId, 'agent_1');
       expect(config.usesSignedCredentials, isFalse);
     });
 
-    test('direct mode still requires an agent id even when opted in', () {
-      expect(
-        () => ConvAiConfig.fromEnvironment(
-          apiKey: 'sk_dev_key',
-          allowInsecureApiKey: true,
-        ),
-        throwsA(
-          isA<ConvAiConfigException>().having(
-            (error) => error.message,
-            'message',
-            contains('ELEVENLABS_AGENT_ID'),
-          ),
-        ),
+    test('production constructors never carry a key', () {
+      final tokenMode = ConvAiConfig(token: 'tok_123', agentId: 'agent_1');
+      final signedMode = ConvAiConfig(
+        signedUrl: 'wss://backend.example/signed?token=abc',
+        agentId: 'agent_1',
       );
-    });
 
-    test('opt-in alone without any credential still throws', () {
-      expect(
-        () => ConvAiConfig.fromEnvironment(allowInsecureApiKey: true),
-        throwsA(isA<ConvAiConfigException>()),
-      );
+      expect(tokenMode.apiKey, isEmpty);
+      expect(signedMode.apiKey, isEmpty);
     });
   });
 }
