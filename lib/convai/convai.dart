@@ -25,5 +25,15 @@ export 'convai_websocket_client.dart'
         ConvAiConnectionException,
         ConvAiConnectionState,
         ConvAiWebSocketClient;
+export 'conversation_history.dart'
+    show
+        ConvAiConversation,
+        ConvAiConversationHistoryStore,
+        ConvAiHistoryException,
+        ConvAiMessage,
+        ConvAiMessageRole,
+        SharedPreferencesConvAiConversationHistoryStore;
 export 'session_store.dart'
     show ConvAiSessionStore, SharedPreferencesConvAiSessionStore;
+export 'turn_rate_limiter.dart'
+    show ConvAiRateLimitException, ConvAiTurnRateLimiter;

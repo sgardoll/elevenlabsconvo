@@ -4,6 +4,13 @@
 /// The thin custom actions in `lib/custom_code/actions/` call into this
 /// service; the core client in `lib/convai/convai_websocket_client.dart`
 /// stays Flutter-free.
+///
+/// Week 2-3 additions: finished exchanges persist to local conversation
+/// history (list / reopen / delete / search), each send is capped by a
+/// per-session turn budget (only PRE-dispatch failures refund; a timed-out
+/// turn stays charged, matching the server's own counting of dispatched
+/// frames), and a text-only fallback flag records graceful degradation when
+/// the voice path fails.
 library;
 
 import 'dart:async';
@@ -14,7 +21,9 @@ import '/flutter_flow/flutter_flow_util.dart';
 import 'convai_config.dart';
 import 'convai_events.dart';
 import 'convai_websocket_client.dart';
+import 'conversation_history.dart';
 import 'session_store.dart';
+import 'turn_rate_limiter.dart';
 import 'typed_turn_tracker.dart';
 
 /// Singleton bridge between the host app and the ConvAI WebSocket client.
@@ -28,6 +37,12 @@ class ConvAiService {
   ConvAiWebSocketClient? _client;
   StreamSubscription<ConvAiConnectionState>? _stateSubscription;
   StreamSubscription<ConvAiEvent>? _eventSubscription;
+
+  final ConvAiConversationHistoryStore _historyStore =
+      const SharedPreferencesConvAiConversationHistoryStore();
+  ConvAiConversation? _activeConversation;
+  bool _textOnlyFallbackActive = false;
+  String? _textOnlyFallbackReason;
 
   final StreamController<ConvAiConnectionState> _stateController =
       StreamController<ConvAiConnectionState>.broadcast();
@@ -48,6 +63,25 @@ class ConvAiService {
 
   /// Persisted local session UUID for this conversation.
   String? get localSessionId => _client?.localSessionId;
+
+  /// Turns still available in the active session's budget.
+  int? get remainingTurns => _client?.remainingTurns;
+
+  /// True once the host marked the voice path as unavailable and the app is
+  /// deliberately running text-only (graceful degradation).
+  bool get isTextOnlyFallbackActive => _textOnlyFallbackActive;
+
+  /// Why text-only mode was entered, when it is active.
+  String? get textOnlyFallbackReason => _textOnlyFallbackReason;
+
+  /// Marks the voice path as unavailable; the app keeps working over the
+  /// WebSocket text channel. Idempotent — the first reason wins.
+  void enableTextOnlyFallback({String reason = 'Voice path unavailable'}) {
+    if (_textOnlyFallbackActive) return;
+    _textOnlyFallbackActive = true;
+    _textOnlyFallbackReason = reason;
+    debugPrint('ConvAI degraded to text-only mode: $reason');
+  }
 
   /// Creates a client from explicit values (falling back to dart-defines) and
   /// opens a session.
@@ -92,6 +126,7 @@ class ConvAiService {
       _client = client;
 
       await client.connect();
+      await _startOrResumeConversation(client);
 
       FFAppState().update(() {
         FFAppState().elevenLabsAgentId = config.agentId;
@@ -99,7 +134,8 @@ class ConvAiService {
 
       debugPrint(
         'ConvAI session established (conversationId: '
-        '${client.conversationId}, localSessionId: ${client.localSessionId})',
+        '${client.conversationId}, localSessionId: ${client.localSessionId}, '
+        'remainingTurns: ${client.remainingTurns})',
       );
       return 'success';
     } on ConvAiConfigException catch (error) {
@@ -119,13 +155,17 @@ class ConvAiService {
   ///
   /// This path only awaits the turn; it does NOT append chat bubbles. The
   /// protocol-event handler is the single owner of message appending, so each
-  /// `agent_response` / `user_transcript` event produces exactly one bubble
-  /// instead of duplicating what this completion path used to add again.
+  /// `agent_response` / `user_transcript` event produces exactly one bubble.
   ///
   /// Typed turns are tracked per send with terminal settlement: whichever
   /// lands first — the server's `user_transcript` echo or the completed
   /// response — owns the single user bubble, and the other path becomes a
   /// no-op, so a late transcript can never duplicate the fallback append.
+  ///
+  /// Rate-limit exhaustion returns a clear budget error; an unanswered send
+  /// returns a timeout error (resending is the caller's choice via a fresh
+  /// send). Successful exchanges persist both messages to local conversation
+  /// history.
   Future<String> sendTextMessage(String text) async {
     final client = _client;
     if (client == null || !client.isConnected) {
@@ -144,7 +184,16 @@ class ConvAiService {
       if (_typedTurns.settleTypedTurn(turn)) {
         _appendMessage(type: 'user', content: trimmed);
       }
+      await _recordExchange(userText: text, agentReply: reply);
       return reply;
+    } on ConvAiRateLimitException catch (error) {
+      _typedTurns.discardTypedTurn(turn);
+      debugPrint('ConvAI rate limit reached: ${error.message}');
+      return 'error: ${error.message}';
+    } on TimeoutException catch (error) {
+      _typedTurns.discardTypedTurn(turn);
+      debugPrint('ConvAI response timeout: ${error.message}');
+      return 'error: Agent did not respond in time (${error.message}).';
     } on Object catch (error) {
       // Unanswered turn: no transcript entry — the server may never have
       // received the text.
@@ -162,6 +211,57 @@ class ConvAiService {
     });
     debugPrint('ConvAI WebSocket service stopped');
     return 'success';
+  }
+
+  // ---------------------------------------------------------------------------
+  // Conversation history
+  // ---------------------------------------------------------------------------
+
+  /// Past conversations, newest-updated first.
+  Future<List<ConvAiConversation>> listConversations() =>
+      _historyStore.loadAll();
+
+  /// One past conversation by id, or `null` when absent.
+  Future<ConvAiConversation?> loadConversation(String id) =>
+      _historyStore.load(id);
+
+  /// Deletes one past conversation. Returns `'success'` (idempotent) or
+  /// `'error: <reason>'`.
+  Future<String> deleteConversation(String id) async {
+    try {
+      await _historyStore.delete(id);
+      if (_activeConversation?.id == id) _activeConversation = null;
+      return 'success';
+    } on Object catch (error) {
+      debugPrint('Error deleting conversation "$id": $error');
+      return 'error: $error';
+    }
+  }
+
+  /// Conversations whose title or messages contain [query]
+  /// (case-insensitive), newest-updated first.
+  Future<List<ConvAiConversation>> searchConversations(String query) =>
+      _historyStore.search(query);
+
+  /// Messages within one conversation containing [query]
+  /// (case-insensitive), oldest first.
+  Future<List<ConvAiMessage>> searchConversationMessages(
+    String conversationId,
+    String query,
+  ) =>
+      _historyStore.searchMessages(conversationId, query);
+
+  /// Removes every stored conversation. Returns `'success'` or
+  /// `'error: <reason>'`.
+  Future<String> clearConversationHistory() async {
+    try {
+      await _historyStore.clear();
+      _activeConversation = null;
+      return 'success';
+    } on Object catch (error) {
+      debugPrint('Error clearing conversation history: $error');
+      return 'error: $error';
+    }
   }
 
   /// Releases the service entirely (streams included). For host-app teardown.
@@ -208,6 +308,60 @@ class ConvAiService {
         },
       ];
     });
+  }
+
+  /// Opens (or resumes) the durable conversation record for a freshly
+  /// connected session, keyed by the server conversation id.
+  Future<void> _startOrResumeConversation(ConvAiWebSocketClient client) async {
+    final sessionId = client.localSessionId;
+    final conversationId = client.conversationId ?? sessionId;
+    // Post-handshake both ids exist; an absent one means history cannot be
+    // attributed, so this session simply runs without persistence.
+    if (sessionId == null || conversationId == null) return;
+
+    final existing = await _historyStore.load(conversationId);
+    _activeConversation = existing ??
+        ConvAiConversation(
+          id: conversationId,
+          sessionId: sessionId,
+          startedAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+        );
+    await _historyStore.save(_activeConversation!);
+  }
+
+  /// Persists one finished user/agent exchange into the active conversation.
+  Future<void> _recordExchange({
+    required String userText,
+    required String agentReply,
+  }) async {
+    final conversation = _activeConversation;
+    if (conversation == null) return;
+
+    final now = DateTime.now();
+    var updated = conversation.withMessage(
+      ConvAiMessage(
+        role: ConvAiMessageRole.user,
+        content: userText,
+        timestamp: now,
+      ),
+    );
+    updated = updated.withMessage(
+      ConvAiMessage(
+        role: ConvAiMessageRole.agent,
+        content: agentReply,
+        timestamp: now,
+      ),
+    );
+
+    _activeConversation = updated;
+    try {
+      await _historyStore.save(updated);
+    } on Object catch (error) {
+      // The chat turn already succeeded; history durability must not fail
+      // it. The in-memory record stays current for the rest of the session.
+      debugPrint('Error persisting conversation history: $error');
+    }
   }
 
   Future<void> _teardownClient() async {

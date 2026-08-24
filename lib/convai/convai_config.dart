@@ -96,7 +96,16 @@ class ConvAiConfig {
   final Duration initiationTimeout;
 
   /// Max time to await an `agent_response` after sending a text message.
+  ///
+  /// A slower answer fails the turn with a detailed [TimeoutException]. The
+  /// turn was dispatched, so its budget charge STANDS (the server counted
+  /// the frame); resending is the caller's choice via a fresh send, which
+  /// pays its own turn.
   final Duration responseTimeout;
+
+  /// Hard cap on user turns per logical session (rate limiting). The count
+  /// persists across app restarts with the session id.
+  final int maxSessionTurns;
 
   /// Base delay for the first reconnect attempt; doubles each attempt.
   final Duration initialBackoff;
@@ -118,7 +127,8 @@ class ConvAiConfig {
     this.allowInsecureTransport = false,
     this.connectTimeout = const Duration(seconds: 15),
     this.initiationTimeout = const Duration(seconds: 15),
-    this.responseTimeout = const Duration(seconds: 45),
+    this.responseTimeout = const Duration(seconds: 30),
+    this.maxSessionTurns = 50,
     this.initialBackoff = const Duration(seconds: 1),
     this.maxBackoff = const Duration(seconds: 30),
     this.maxReconnectAttempts = 5,
@@ -140,7 +150,8 @@ class ConvAiConfig {
     this.allowInsecureTransport = false,
     this.connectTimeout = const Duration(seconds: 15),
     this.initiationTimeout = const Duration(seconds: 15),
-    this.responseTimeout = const Duration(seconds: 45),
+    this.responseTimeout = const Duration(seconds: 30),
+    this.maxSessionTurns = 50,
     this.initialBackoff = const Duration(seconds: 1),
     this.maxBackoff = const Duration(seconds: 30),
     this.maxReconnectAttempts = 5,
