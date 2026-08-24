@@ -7,9 +7,10 @@
 ///
 /// Week 2-3 additions: finished exchanges persist to local conversation
 /// history (list / reopen / delete / search), each send is capped by a
-/// per-session turn budget (timed-out turns are refunded so caller-driven
-/// retries are not double-charged), and a text-only
-/// fallback flag records graceful degradation when the voice path fails.
+/// per-session turn budget (only PRE-dispatch failures refund; a timed-out
+/// turn stays charged, matching the server's own counting of dispatched
+/// frames), and a text-only fallback flag records graceful degradation when
+/// the voice path fails.
 library;
 
 import 'dart:async';

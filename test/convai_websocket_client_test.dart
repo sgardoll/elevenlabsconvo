@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:eleven_labs_conversational_a_i_library/convai/convai_config.dart';
 import 'package:eleven_labs_conversational_a_i_library/convai/convai_websocket_client.dart';
 import 'package:eleven_labs_conversational_a_i_library/convai/session_store.dart';
+import 'package:eleven_labs_conversational_a_i_library/convai/turn_rate_limiter.dart';
 
 /// Minimal ConvAI protocol server over a real loopback WebSocket, so client
 /// lifecycle behavior (handshake, reconnect, drops) is exercised end-to-end.
@@ -70,6 +71,14 @@ class _TestConvAiServer {
       await socket.close().catchError((_) {});
     }
     await _httpServer?.close(force: true).catchError((_) {});
+  }
+
+  /// Closes every accepted socket while the HTTP listener stays up, so
+  /// clients observe an unexpected mid-session drop.
+  Future<void> closeSockets() async {
+    for (final socket in List<WebSocket>.of(_sockets)) {
+      await socket.close().catchError((_) {});
+    }
   }
 }
 
@@ -333,8 +342,8 @@ void main() {
       expect(await client.sendMessage('hello'), 'echo: hello');
     });
 
-    test('a timed-out turn throws detailed, refunds the budget, never '
-        'auto-resends, and a fresh send works', () async {
+    test('a timed-out turn keeps its charge, never auto-resends, and the '
+        'caller-driven retry hits the rate limit at cap', () async {
       final endpoint = Uri.parse(await server.start());
       var userMessages = 0;
       server.onConnection = (socket, index) {
@@ -344,8 +353,8 @@ void main() {
         final frame = jsonDecode(data as String) as Map<String, dynamic>;
         if (frame['type'] != 'user_message') return;
         userMessages += 1;
-        // Only the SECOND send (the caller-driven retry) gets an answer; the
-        // first must time out.
+        // Only a SECOND dispatched frame would get an answer; the first
+        // must time out.
         if (userMessages == 2) {
           socket.add(jsonEncode(<String, dynamic>{
             'type': 'agent_response',
@@ -393,13 +402,57 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 200));
       expect(userMessages, 1);
 
-      // The timed-out turn was refunded — a cap of 1 would otherwise block
-      // the retry with ConvAiRateLimitException — so a fresh caller-driven
-      // send succeeds and pays exactly one charge.
-      expect(client.remainingTurns, 1);
-      expect(await client.sendMessage('again'), 'echo: again');
-      expect(client.remainingTurns, 0);
-      expect(userMessages, 2);
+      // The turn WAS dispatched — the frame reached the socket and the
+      // server counted it — so the budget charge STANDS despite the
+      // timeout. With cap 1 the budget is now exhausted.
+      expect(client.remainingTurns, 0,
+          reason: 'A dispatched turn stays charged even on timeout.');
+
+      // A caller-driven retry must pay a fresh turn; at the cap it is
+      // refused BEFORE another frame can reach the wire.
+      await expectLater(
+        client.sendMessage('again'),
+        throwsA(isA<ConvAiRateLimitException>()),
+      );
+      expect(userMessages, 1,
+          reason: 'The rate-limited retry must not dispatch anything.');
+    });
+
+    test('only PRE-dispatch failures refund: dropped socket refunds the '
+        'queued send while the dispatched one stays charged', () async {
+      final endpoint = Uri.parse(await server.start());
+      final firstFrameReceived = Completer<void>();
+      server.onConnection = (socket, index) {
+        _TestConvAiServer._completeHandshake(socket, 'conv_drop');
+      };
+      server.onMessage = (socket, data) {
+        final frame = jsonDecode(data as String) as Map<String, dynamic>;
+        if (frame['type'] == 'user_message' && !firstFrameReceived.isCompleted) {
+          firstFrameReceived.complete();
+        }
+      };
+
+      final client = _clientFor(endpoint, maxSessionTurns: 5);
+      addTearDown(client.dispose);
+      await client.connect();
+
+      // Turn 1 dispatches and provably reaches the server...
+      final dispatched = client.sendMessage('dispatched');
+      // ...while turn 2 queues behind it while the connection is healthy.
+      final queued = client.sendMessage('queued');
+
+      await firstFrameReceived.future;
+
+      // The server drops the connection: turn 1 fails POST-dispatch (its
+      // charge stands), and the queued turn 2 then executes with no socket
+      // left — a PRE-dispatch failure that refunds.
+      await server.closeSockets();
+      await expectLater(dispatched, throwsStateError);
+      await expectLater(queued, throwsA(isA<ConvAiDispatchException>()));
+
+      expect(client.remainingTurns, 4,
+          reason: 'Exactly one of the two sends (the dispatched one) '
+              'must stay charged.');
     });
 
     test('turn budget persists per conversation and resets for new ones',

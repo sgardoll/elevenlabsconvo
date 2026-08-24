@@ -62,6 +62,18 @@ class ConvAiConnectionException implements Exception {
   String toString() => 'ConvAiConnectionException: $message';
 }
 
+/// Thrown when a user message could not be handed to the socket: the frame
+/// was never dispatched, so the server never saw — or counted — the turn.
+/// This is the only send failure that refunds its budget charge.
+class ConvAiDispatchException implements Exception {
+  final String message;
+
+  const ConvAiDispatchException(this.message);
+
+  @override
+  String toString() => 'ConvAiDispatchException: $message';
+}
+
 /// Manages one ConvAI WebSocket conversation end-to-end.
 class ConvAiWebSocketClient {
   ConvAiWebSocketClient({
@@ -157,12 +169,14 @@ class ConvAiWebSocketClient {
   ///
   /// Concurrent calls are serialized; each resolves against its own turn.
   /// Throws [TimeoutException] — carrying the elapsed window and attempt
-  /// count — when no response arrives within [ConvAiConfig.responseTimeout];
-  /// resend by calling [sendMessage] again (each call is its own turn, with a
-  /// fresh generation and budget charge; a timed-out turn is refunded).
-  /// Throws [ConvAiRateLimitException] once the session's turn budget is
-  /// exhausted, and [StateError] when the connection drops before the
-  /// exchange completes.
+  /// count — when no response arrives within [ConvAiConfig.responseTimeout].
+  /// A timed-out turn was already DISPATCHED, so its budget charge stands
+  /// (the server counted the frame); resending is the caller's decision, and
+  /// each fresh [sendMessage] pays its own turn. Throws
+  /// [ConvAiRateLimitException] once the session's turn budget is exhausted,
+  /// [ConvAiDispatchException] when the message could not reach the socket —
+  /// the one failure that refunds — and [StateError] when the connection
+  /// drops before the exchange completes.
   Future<String> sendMessage(String text) {
     if (!_shouldStayConnected) {
       throw StateError('sendMessage called before connect().');
@@ -438,7 +452,7 @@ class ConvAiWebSocketClient {
 
     switch (event) {
       case final PingReceived ping:
-        _sendOrDrop(ConvAiEventCodec.encodePong(ping.eventId));
+        _dispatch(ConvAiEventCodec.encodePong(ping.eventId));
       case final ConversationInitiationMetadata metadata:
         _initiationCompleter?.complete(metadata);
       case final AgentResponse response:
@@ -476,11 +490,18 @@ class ConvAiWebSocketClient {
     completer.complete(response);
   }
 
-  void _sendOrDrop(String payload) {
+  /// Writes [payload] to the open socket. Returns true when the frame was
+  /// handed to the transport (DISPATCHED), false when no socket existed or
+  /// the transport rejected the write.
+  bool _dispatch(String payload) {
     try {
-      _channel?.sink.add(payload);
+      final sink = _channel?.sink;
+      if (sink == null) return false;
+      sink.add(payload);
+      return true;
     } on Object catch (error) {
       _lastError = error;
+      return false;
     }
   }
 
@@ -489,17 +510,25 @@ class ConvAiWebSocketClient {
   // ---------------------------------------------------------------------------
 
   /// Enforces the turn budget, consumes one turn, persists the count, then
-  /// performs the exchange. A timed-out exchange refunds its turn so a
-  /// caller-driven retry via a fresh [sendMessage] is not double-charged.
+  /// performs the exchange.
+  ///
+  /// Budget honesty mirrors the server's own accounting:
+  /// - PRE-DISPATCH failure ([ConvAiDispatchException]: no socket, or the
+  ///   transport rejected the write): the server never received the frame,
+  ///   so the charge is refunded before the caller retries.
+  /// - POST-DISPATCH failure ([TimeoutException], disconnect mid-wait): the
+  ///   frame was written and the server counted it, so the charge STANDS. A
+  ///   caller-driven retry pays a fresh turn — repeated timeouts consume the
+  ///   budget exactly like repeated server-side turns.
   Future<String> _guardedRoundTrip(String text) async {
     _turnLimiter.ensureCanSend();
     _turnLimiter.recordTurn();
     await _persistTurnCount();
     try {
       return await _roundTrip(text);
-    } on TimeoutException {
-      // The turn never produced an answer, so the budget charge returns to
-      // the caller before the retry send is counted as its own turn.
+    } on ConvAiDispatchException {
+      // The frame never reached the wire: neither the server nor this
+      // client counts the exchange.
       _turnLimiter.refundTurn();
       await _persistTurnCount();
       rethrow;
@@ -529,7 +558,17 @@ class ConvAiWebSocketClient {
     _responseCompleter = completer;
     _responseGeneration = generation;
     try {
-      _sendOrDrop(ConvAiEventCodec.encodeUserMessage(text));
+      final dispatched = _dispatch(ConvAiEventCodec.encodeUserMessage(text));
+      if (!dispatched) {
+        // PRE-DISPATCH failure: nothing reached the wire. Fail now instead
+        // of waiting out a response window no server can answer — this is
+        // the one failure whose budget charge is refunded.
+        const error = ConvAiDispatchException(
+          'Message not sent: the socket is unavailable.',
+        );
+        _lastError = error;
+        throw error;
+      }
       final response =
           await completer.future.timeout(_config.responseTimeout);
       return response.text;
