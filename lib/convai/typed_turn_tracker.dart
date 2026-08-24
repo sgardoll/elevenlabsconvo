@@ -16,12 +16,12 @@
 /// Settlement is terminal by construction: once a turn leaves `pending`,
 /// later events referencing it are no-ops.
 ///
-/// SUPPRESSION IS TURN-CYCLE SCOPED, never session-scoped. A fallback-
-/// settled text is retained only until the NEXT turn cycle begins
-/// ([registerTypedTurn]), the tracker is cleared ([clear] — called on
-/// teardown/disconnect and new-conversation initialization), or its record
-/// ages past [maxSuppressionAgeTicks] turns (monotonic tick). A later
-/// identical phrase — in the same session or a brand-new one — therefore
+/// SUPPRESSION IS AGE-BOUNDED, never session-scoped. A fallback-settled
+/// text is retained across intervening turns so its late transcript stays
+/// suppressed ([maxSuppressionAgeTicks] registrations, whichever comes
+/// first with the retained-text cap), and everything is wiped by [clear]
+/// (called on teardown/disconnect and new-conversation initialization). A
+/// genuinely new phrase — same session or a brand-new one — therefore
 /// always appends its own bubble instead of being wrongly swallowed.
 class TypedTurnTracker {
   TypedTurnTracker({
@@ -35,8 +35,9 @@ class TypedTurnTracker {
   final int maxRetainedFallbackTexts;
 
   /// How many turn registrations a suppression record may outlive before it
-  /// expires. Belt-and-braces alongside cycle clearing: a record can never
-  /// suppress a phrase sent more than this many turns after its own.
+  /// expires. Records survive intervening turns so a response-first turn's
+  /// late transcript stays suppressed across them, but can never suppress a
+  /// phrase sent more than this many turns after its own.
   final int maxSuppressionAgeTicks;
 
   /// Monotonic counter bumped by every [registerTypedTurn]; ages records
@@ -52,14 +53,15 @@ class TypedTurnTracker {
   /// Retained fallback-settled texts awaiting possible late transcripts.
   int get retainedFallbackTextCount => _suppressions.length;
 
-  /// Registers a typed send and opens a fresh turn cycle.
+  /// Registers a typed send and ages suppression records.
   ///
-  /// Opening a cycle discards every suppression record from earlier cycles:
-  /// those phrases already have their bubbles, and letting their records
-  /// persist would swallow a later identical phrase.
+  /// Registration deliberately does NOT clear records: a fallback-settled
+  /// turn's transcript routinely lands after the user's NEXT send, and
+  /// clearing here duplicated that bubble (STU-17). Records instead expire
+  /// once they outlive [maxSuppressionAgeTicks] registrations.
   TypedTurn registerTypedTurn(String text) {
-    _suppressions.clear();
     _tick += 1;
+    _expireAgedSuppressions();
     final turn = TypedTurn._(text, registeredAtTick: _tick);
     _pending.add(turn);
     return turn;

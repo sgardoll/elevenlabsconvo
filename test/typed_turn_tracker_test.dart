@@ -139,22 +139,43 @@ void main() {
     });
   });
 
-  group('TypedTurnTracker suppression lifetime (turn-cycle scoped)', () {
-    test('a later identical phrase in the same session appends its bubble',
-        () {
+  group('TypedTurnTracker suppression lifetime (age-bounded)', () {
+    test('late transcript stays suppressed across an intervening turn '
+        '(Greptile round-5 repro)', () {
       final tracker = TypedTurnTracker();
       final first = tracker.registerTypedTurn('hello');
       // Response-first ordering leaves a suppression record behind.
       expect(tracker.settleTypedTurn(first), isTrue);
       expect(tracker.retainedFallbackTextCount, 1);
 
-      // A new turn cycle begins; the stale record must be dropped, so this
-      // later identical phrase is NOT swallowed (the Greptile P1).
+      // The user sends a DIFFERENT message before turn one's transcript
+      // lands. Registering it must not drop turn one's record.
       final second = tracker.registerTypedTurn('how are you');
-      expect(tracker.noteUserTranscript('hello'), isTrue,
-          reason: 'Suppression must not outlive its turn cycle.');
+      expect(tracker.retainedFallbackTextCount, 1,
+          reason: 'Registration ages records; it must not wipe them.');
+
+      // Turn one's late transcript arrives: suppressed (bubble already
+      // exists), and turn two settles normally via its own echo.
+      expect(tracker.noteUserTranscript('hello'), isFalse,
+          reason: 'Late echo of a fallback-settled turn must not duplicate.');
       expect(tracker.noteUserTranscript('how are you'), isTrue);
-      expect(tracker.settleTypedTurn(second), isFalse);
+      expect(tracker.settleTypedTurn(second), isFalse,
+          reason: 'Echo path already settled turn two.');
+    });
+
+    test('a genuinely new identical send still gets its own bubble', () {
+      final tracker = TypedTurnTracker();
+      final first = tracker.registerTypedTurn('hello');
+      expect(tracker.settleTypedTurn(first), isTrue);
+
+      // Same text sent again while the old record lives: the live pending
+      // turn wins over suppression, so its echo appends normally.
+      final second = tracker.registerTypedTurn('hello');
+      expect(tracker.noteUserTranscript('hello'), isTrue);
+      expect(tracker.settleTypedTurn(second), isFalse,
+          reason: 'Echo path already settled the new send.');
+      expect(tracker.noteUserTranscript('hello'), isFalse,
+          reason: 'First fallback record suppresses its own late echo.');
       expect(tracker.retainedFallbackTextCount, 0);
     });
 
@@ -176,16 +197,18 @@ void main() {
     });
 
     test('records expire once older than maxSuppressionAgeTicks', () {
-      final tracker = TypedTurnTracker(maxSuppressionAgeTicks: 1);
+      final tracker = TypedTurnTracker(maxSuppressionAgeTicks: 2);
       final turn = tracker.registerTypedTurn('hello');
       expect(tracker.settleTypedTurn(turn), isTrue);
       // Same tick as registration: the late echo is still suppressed.
       expect(tracker.noteUserTranscript('hello'), isFalse);
 
-      final agedOut = TypedTurnTracker(maxSuppressionAgeTicks: 0);
-      final stale = agedOut.registerTypedTurn('stale');
-      expect(agedOut.settleTypedTurn(stale), isTrue);
-      expect(agedOut.noteUserTranscript('stale'), isTrue,
+      // Re-arm a record, then age it out with subsequent registrations.
+      final armed = tracker.registerTypedTurn('stale');
+      expect(tracker.settleTypedTurn(armed), isTrue);
+      tracker.registerTypedTurn('intervening 1');
+      tracker.registerTypedTurn('intervening 2');
+      expect(tracker.noteUserTranscript('stale'), isTrue,
           reason: 'Aged-out records must stop suppressing phrases.');
     });
   });
@@ -204,32 +227,42 @@ void main() {
         peakPending =
             peakPending > tracker.pendingCount ? peakPending : tracker
                 .pendingCount;
-        // Registering opened a fresh cycle: nothing may have leaked in.
-        expect(tracker.retainedFallbackTextCount, 0,
-            reason: 'Suppression must not survive into a new turn cycle.');
+        // Registration ages records instead of wiping them: retained texts
+        // stay within the burst cap until their ticks run out.
+        expect(tracker.retainedFallbackTextCount <= 2, isTrue,
+            reason: 'Aging + the retention cap bound retained records.');
         if (i.isEven) {
           // Response-first ordering leaves one suppression record behind...
           expect(tracker.settleTypedTurn(turn), isTrue);
-          expect(tracker.retainedFallbackTextCount, 1);
+          expect(tracker.retainedFallbackTextCount <= 2, isTrue,
+              reason: 'Records from the last two turns may still be alive.');
         } else {
-          // ...and transcript-first ordering creates none.
+          // ...and transcript-first ordering creates none. The record from
+          // the previous even turn is still within its age window here.
           expect(tracker.noteUserTranscript('turn $i'), isTrue);
           expect(tracker.settleTypedTurn(turn), isFalse);
-          expect(tracker.retainedFallbackTextCount, 0);
         }
       }
 
       expect(peakPending, 1,
           reason: 'Each turn must be pruned as soon as it settles.');
       expect(tracker.pendingCount, 0);
+      // Records from the final turns are still inside their age window.
+      expect(tracker.retainedFallbackTextCount <= 2, isTrue);
+      // A few more registrations age every record out without clear().
+      for (var i = 0; i < 5; i++) {
+        tracker.registerTypedTurn('drain $i');
+      }
       expect(tracker.retainedFallbackTextCount, 0,
-          reason: 'The final transcript-first cycle leaves no records.');
+          reason: 'Aged records drain without explicit clearing.');
     });
 
-    test('same-cycle settlement bursts stay capped, then drain on the next '
-        'cycle', () {
+    test('same-cycle settlement bursts stay capped, then age out', () {
       const retentionCap = 3;
-      final tracker = TypedTurnTracker(maxRetainedFallbackTexts: retentionCap);
+      final tracker = TypedTurnTracker(
+        maxRetainedFallbackTexts: retentionCap,
+        maxSuppressionAgeTicks: 1,
+      );
 
       // Concurrent sends all register before any settles: their records
       // accumulate within ONE turn cycle and hit the cap.
@@ -243,7 +276,7 @@ void main() {
       expect(tracker.retainedFallbackTextCount, retentionCap,
           reason: 'Bursts must stay bounded by the retention cap.');
 
-      // The next registration opens a cycle and drains them all.
+      // Records age out once they outlive their tick window.
       tracker.registerTypedTurn('after the burst');
       expect(tracker.retainedFallbackTextCount, 0);
     });
